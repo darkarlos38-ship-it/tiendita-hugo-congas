@@ -2653,6 +2653,45 @@ body.hc-home-mode .ds-brand:hover{color:#fed700!important}
   background-repeat: no-repeat !important;
 }
 </style>
+<style id="hc-am-carbon-and-claims">
+/* Hugo Congas: modales AMOLED con contraste legible y accesibilidad */
+#cartModal .dsp-single-sheet,#productSheetModal .dsp-single-sheet,#hc-claims-modal .hc-claims-dialog{
+ background:#0b0b0d!important;color:#f9fafb!important;border:1px solid #34343a!important;
+ box-shadow:0 24px 90px #000c!important;
+}
+#cartModal .dsp-single-sheet *,#productSheetModal .dsp-single-sheet * {color:inherit}
+#cartModal .dsp-single-sheet [style*="color:#6B7280"]{color:#bbc0cb!important}
+#cartModal .dsp-single-sheet [style*="border-bottom"],#cartModal .dsp-single-sheet [style*="border-top"]{border-color:#36363a!important}
+#cartModal button,#productSheetModal button {cursor:pointer}
+#cartModal .dsp-quote-box__btn{background:#ffd600!important;color:#101010!important;border-radius:12px!important;padding:15px!important;font-weight:800!important}
+#cartModal .dsp-quote-box__btn * {color:#101010!important}
+#cartModal .dsp-quote-box__btn:disabled{opacity:.5!important;cursor:not-allowed!important}
+#cartModal button[onclick="closeCartDrawer()"],#productSheetModal button[onclick="closeProductSheet()"]{background:#26262b!important;color:#fff!important;border:1px solid #505058!important;border-radius:50%!important;width:36px;height:36px}
+#cartModal #cartItemsList>div{border-color:#323236!important}
+#productSheetModal input,#productSheetModal select,#productSheetModal textarea{background:#19191d!important;color:#fff!important;border:1px solid #555!important}
+#hc-claims-modal{display:none;position:fixed;inset:0;z-index:11050;background:#000d;align-items:center;justify-content:center;padding:14px;overflow:auto}
+#hc-claims-modal.is-open{display:flex}
+#hc-claims-modal .hc-claims-dialog{width:min(100%,850px);max-height:94vh;overflow:auto;border-radius:18px;padding:clamp(18px,3vw,34px);position:relative}
+#hc-claims-modal [hidden]{display:none!important}
+#hc-claims-modal h2{font-size:clamp(21px,3vw,28px);margin:0 0 6px}
+#hc-claims-modal h3{font-size:16px;margin:23px 0 12px;padding-bottom:7px;border-bottom:1px solid #323238}
+#hc-claims-modal .hc-claims-sub{color:#b6b7be;font-size:13px;line-height:1.5}
+#hc-claims-modal label{display:grid;gap:7px;color:#eee;font-size:13px;font-weight:650}
+#hc-claims-modal .hc-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+#hc-claims-modal .hc-wide{grid-column:1/-1}
+#hc-claims-modal input,#hc-claims-modal select,#hc-claims-modal textarea{width:100%;background:#17171b!important;color:#fff!important;border:1px solid #51515a!important;border-radius:9px;padding:12px;outline:none;font:inherit;min-width:0;}
+#hc-claims-modal input:focus,#hc-claims-modal select:focus,#hc-claims-modal textarea:focus{border-color:#ffda00!important;box-shadow:0 0 0 2px #ffda0033}
+#hc-claims-modal textarea{min-height:100px;resize:vertical}
+#hc-claims-modal .hc-check{display:flex;align-items:flex-start;gap:10px;font-weight:400}
+#hc-claims-modal .hc-check input{width:auto;margin-top:4px}
+#hc-claims-modal .hc-button{border:0;background:#ffd900!important;color:#101010!important;padding:13px 20px;border-radius:9px;font-weight:800;cursor:pointer}
+#hc-claims-modal .hc-close{position:absolute;right:16px;top:14px;background:#222;color:white;border:1px solid #48484f;border-radius:50%;width:38px;height:38px;cursor:pointer}
+#hc-claims-modal #hc-claims-status{color:#ffd900;white-space:pre-line;margin-top:12px;font-size:14px}
+#hc-claims-modal .hc-sent{background:#141f18;border:1px solid #31533d;border-radius:12px;padding:16px;margin-top:14px}
+#hc-claims-modal .hc-sent button{background:#202128;color:white;border:1px solid #555;border-radius:8px;padding:10px;cursor:pointer}
+#hc-claims-modal .hc-provider{background:#151518;border:1px solid #35353a;padding:12px;border-radius:10px;line-height:1.7;font-size:13px}
+@media(max-width:620px){#hc-claims-modal .hc-fields{grid-template-columns:1fr}#hc-claims-modal .hc-claims-dialog{padding:18px}#hc-claims-modal .hc-wide{grid-column:auto}}
+</style>
 </head>
 
 <body class="home woocommerce-page archive">
@@ -3262,7 +3301,7 @@ body.hc-home-mode .ds-brand:hover{color:#fed700!important}
                     <li><a href="#" onclick="openCartDrawer(); return false;">Mi carrito / Cotizador</a></li>
                     <li><a href="#preguntas-frecuentes">Envíos y entregas</a></li>
                     <li><a href="#preguntas-frecuentes">Preguntas frecuentes</a></li>
-                    <li><a href="#preguntas-frecuentes">Libro de Reclamaciones</a></li>
+                    <li><a href="#libro-reclamaciones" onclick="openClaimsBook(event)">Libro de Reclamaciones</a></li>
                 </ul>
             </div>
 
@@ -4202,6 +4241,7 @@ body.hc-home-mode .ds-brand:hover{color:#fed700!important}
         function updateCartUI() {
             const totalCount = cart.reduce((acc, item) => acc + item.qty, 0);
             document.getElementById('headerCartCount').textContent = totalCount;
+            const quoteBtn=document.querySelector('#cartModal .dsp-quote-box__btn');if(quoteBtn)quoteBtn.disabled=totalCount===0;
 
             const listEl = document.getElementById('cartItemsList');
             let totalPEN = 0;
@@ -4245,7 +4285,7 @@ body.hc-home-mode .ds-brand:hover{color:#fed700!important}
         }
 
         function sendCartWhatsApp() {
-            if (cart.length === 0) return;
+            if (cart.length === 0) {const list=document.getElementById('cartItemsList');if(list)list.innerHTML='<p style="color:#e4e4e9;text-align:center">Añade un instrumento antes de solicitar una cotización.</p>';return;}
             let total = 0;
             const lines = cart.map(item => {
                 const p = PRODUCTS.find(x => x.id === item.id);
@@ -4259,7 +4299,9 @@ body.hc-home-mode .ds-brand:hover{color:#fed700!important}
 
         function handleNewsletterSubmit(e) {
             e.preventDefault();
-            document.getElementById('newsletterSuccessMsg').style.display = 'block';
+            const email=document.getElementById('newsletterEmail').value.trim();
+            if(!email)return;
+            window.open('https://wa.me/51916200641?text='+encodeURIComponent('Hola, deseo consultar ofertas de Hugo Congas. Mi correo es '+email),'_blank','noopener');
             document.getElementById('newsletterEmail').value = '';
         }
 
@@ -4374,5 +4416,71 @@ body.hc-home-mode .ds-brand:hover{color:#fed700!important}
   });
 })();
 </script>
+
+<div id="hc-claims-modal" role="dialog" aria-modal="true" aria-labelledby="hc-claims-title">
+ <div class="hc-claims-dialog">
+  <button type="button" class="hc-close" onclick="closeClaimsBook()" aria-label="Cerrar">✕</button>
+  <h2 id="hc-claims-title">Libro de Reclamaciones Virtual</h2>
+  <p class="hc-claims-sub">TIENDITA MUSICAL HUGO CONGAS · Presentación de reclamos y quejas de clientes en Perú</p>
+  <div class="hc-provider" id="hc-claim-provider"><strong>Proveedor:</strong> <span id="hc-claim-provider-name">Datos legales pendientes de configurar por el titular de la tienda</span><div id="hc-claim-provider-extra"></div></div>
+  <p class="hc-claims-sub">El proveedor debe responder en un máximo de 15 días hábiles. Un reclamo está relacionado con el producto o servicio; una queja, con la atención recibida.</p>
+  <form id="hc-claims-form">
+   <h3>1. Identificación de la persona consumidora</h3>
+   <div class="hc-fields">
+    <label>Nombre(s) *<input name="nombres" required maxlength="120" autocomplete="given-name"></label>
+    <label>Apellidos *<input name="apellidos" required maxlength="120" autocomplete="family-name"></label>
+    <label>Tipo de documento *<select name="documento_tipo" required><option value="DNI">DNI</option><option value="CE">Carné de extranjería</option><option value="Pasaporte">Pasaporte</option><option value="Otro">Otro</option></select></label>
+    <label>N.º de documento *<input name="documento" maxlength="25" required></label>
+    <label>Correo electrónico *<input name="correo" type="email" required autocomplete="email" maxlength="160"></label>
+    <label>Teléfono *<input name="telefono" type="tel" required maxlength="25" autocomplete="tel"></label>
+    <label class="hc-wide">Domicilio / dirección *<input name="domicilio" required maxlength="240" autocomplete="street-address"></label>
+    <label>Departamento *<input name="departamento" required maxlength="80"></label>
+    <label>Distrito *<input name="distrito" required maxlength="80"></label>
+    <label class="hc-wide hc-check"><input name="menor" type="checkbox" id="hc-claims-minor"> El consumidor es menor de edad</label>
+    <label class="hc-wide" id="hc-claims-guardian" hidden>Nombre y documento del padre, madre o representante *<input name="representante" maxlength="220"></label>
+   </div>
+   <h3>2. Producto o servicio</h3>
+   <div class="hc-fields">
+    <label>Tipo *<select name="bien_tipo" required><option value="Producto">Producto</option><option value="Servicio">Servicio</option></select></label>
+    <label>Monto reclamado (S/) *<input name="monto" type="number" min="0" max="99999999" step="0.01" required></label>
+    <label class="hc-wide">Descripción del producto o servicio *<textarea name="bien_descripcion" maxlength="1800" required></textarea></label>
+   </div>
+   <h3>3. Detalle del reclamo o queja</h3>
+   <div class="hc-fields">
+    <label class="hc-wide">Tipo de registro *<select name="tipo" required><option value="Reclamo">Reclamo — producto o servicio</option><option value="Queja">Queja — atención recibida</option></select></label>
+    <label class="hc-wide">Detalle de lo ocurrido *<textarea name="detalle" maxlength="4000" minlength="12" required></textarea></label>
+    <label class="hc-wide">¿Qué solución solicita? *<textarea name="pedido" maxlength="3000" minlength="5" required></textarea></label>
+    <label class="hc-wide hc-check"><input name="acepta" type="checkbox" required> Declaro que la información es verdadera y autorizo el tratamiento de estos datos exclusivamente para atender mi reclamo o queja. *</label>
+   </div>
+   <p class="hc-claims-sub">Presentar este formulario no limita tu derecho a acudir a Indecopi. Se generará un número y una copia imprimible tras registrarlo. La respuesta se comunicará al correo proporcionado por el cliente.</p>
+   <button class="hc-button" type="submit" id="hc-claims-send">Registrar reclamo o queja</button>
+   <p id="hc-claims-status" role="status" aria-live="polite"></p>
+   <div class="hc-sent" id="hc-claims-receipt" hidden><strong id="hc-claims-receipt-number"></strong><p>Guarda tu número de registro y conserva la copia.</p><button type="button" id="hc-claims-print">Imprimir / guardar constancia PDF</button></div>
+  </form>
+ </div>
+</div>
+<script id="hc-reclamaciones-funcional">
+(()=>{
+ const q=id=>document.getElementById(id);
+ let provider=null,lastReceipt=null;
+ window.openClaimsBook=function(ev){if(ev)ev.preventDefault();q('hc-claims-modal').classList.add('is-open');document.body.style.overflow='hidden';q('hc-claims-status').textContent='';loadProvider();};
+ window.closeClaimsBook=function(){q('hc-claims-modal').classList.remove('is-open');document.body.style.overflow='';};
+ q('hc-claims-modal').addEventListener('click',e=>{if(e.target===q('hc-claims-modal'))closeClaimsBook()});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&q('hc-claims-modal').classList.contains('is-open'))closeClaimsBook()});
+ q('hc-claims-minor').addEventListener('change',e=>{q('hc-claims-guardian').hidden=!e.target.checked;q('hc-claims-guardian').querySelector('input').required=e.target.checked});
+ async function loadProvider(){try{const r=await fetch('/api/provider',{cache:'no-store'});if(!r.ok)return;provider=await r.json();const {legalName,ruc,address}=provider||{};if(legalName&&ruc&&address){q('hc-claim-provider-name').textContent=legalName;q('hc-claim-provider-extra').textContent='RUC: '+ruc+' · Dirección: '+address}else{q('hc-claim-provider-name').textContent='Pendiente de completar nombre legal, RUC y domicilio del proveedor';q('hc-claim-provider-extra').textContent='El titular de la tienda debe registrarlos en el administrador antes de habilitar el libro de reclamaciones.'}}catch(err){console.error(err)}}
+ q('hc-claims-form').addEventListener('submit',async e=>{
+  e.preventDefault();const f=e.currentTarget,btn=q('hc-claims-send'),msg=q('hc-claims-status');
+  if(!f.reportValidity())return;
+  if(location.protocol==='file:'){msg.textContent='Vista previa local: el reclamo no se ha enviado. Publícalo en Cloudflare para registrar solicitudes en D1.';return}
+  btn.disabled=true;msg.textContent='Registrando solicitud...';
+  const data=Object.fromEntries(new FormData(f).entries());data.menor=!!f.elements.menor.checked;
+  try{const r=await fetch('/api/claims',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const j=await r.json();if(!r.ok)throw Error(j.error||'No se pudo registrar la solicitud');lastReceipt={...data,number:j.number,date:j.date,provider:j.provider};q('hc-claims-receipt-number').textContent='Registro confirmado: '+j.number;q('hc-claims-receipt').hidden=false;msg.textContent='Registrado correctamente. Guarda tu constancia.';f.querySelectorAll('input,textarea,select').forEach(x=>{x.disabled=true});btn.hidden=true;
+  }catch(err){msg.textContent=err.message;btn.disabled=false}
+ });
+ q('hc-claims-print').addEventListener('click',()=>{if(!lastReceipt)return;const data=lastReceipt;let lines=['LIBRO DE RECLAMACIONES - CONSTANCIA','Registro: '+data.number,'Fecha: '+data.date,'Proveedor: '+(data.provider?.legalName||'')+' | RUC: '+(data.provider?.ruc||''),'Domicilio del proveedor: '+(data.provider?.address||''),'','Cliente: '+data.nombres+' '+data.apellidos,'Documento: '+data.documento_tipo+' '+data.documento,'Correo: '+data.correo,'Teléfono: '+data.telefono,'Domicilio: '+data.domicilio+', '+data.distrito+', '+data.departamento,'Representante: '+(data.representante||'No aplica'),'Tipo: '+data.tipo,'Bien: '+data.bien_tipo+' · S/ '+data.monto,'Descripción: '+data.bien_descripcion,'','DETALLE:',data.detalle,'','PEDIDO:',data.pedido,'','Plazo de respuesta: 15 días hábiles.'];const w=window.open('','_blank','width=860,height=750');if(!w)return;w.document.write('<!doctype html><meta charset="utf-8"><title>Constancia '+data.number+'</title><style>body{font:15px/1.6 Arial;padding:30px;white-space:pre-wrap;max-width:760px;margin:auto}</style><div id="txt"></div>');w.document.getElementById('txt').textContent=lines.join('\n');w.document.close();w.focus();setTimeout(()=>w.print(),300)});
+})();
+</script>
+
 </body>
 </html>
