@@ -2492,7 +2492,7 @@ body.hc-product-mode .shop-control-bar,body.hc-product-mode #archiveProductsGrid
 .hc-service-grid i{color:#fed700;font-size:21px}
 .hc-service-grid strong{font-size:16px}.hc-service-grid span{font-size:13px;color:#c5c5c5;line-height:1.5}
 .dsp-promo-card--large{background:linear-gradient(90deg,rgba(8,9,12,.94) 0%,rgba(8,9,12,.67) 58%,rgba(8,9,12,.12) 100%),url('https://images.unsplash.com/photo-1511192336575-5a79af67a629?auto=format&fit=crop&w=1250&q=85') center/cover no-repeat}
-.dsp-promo-card--top{background:linear-gradient(90deg,#101114 0%,rgba(16,17,20,.90) 47%,rgba(16,17,20,.2) 100%),url('https://images.unsplash.com/photo-1516280440614-37939d6bbacd?auto=format&fit=crop&w=900&q=85') center/cover no-repeat}
+.dsp-promo-card--top{background:linear-gradient(90deg,rgba(8,8,10,.98) 0%,rgba(8,8,10,.90) 42%,rgba(8,8,10,.12) 100%),url('https://images.unsplash.com/photo-1583459259601-b141d4bbf03e?auto=format&fit=crop&w=1100&q=85') 70% 50%/cover no-repeat}
 .dsp-promo-card--bottom{background:linear-gradient(90deg,#101114 0%,rgba(16,17,20,.92) 52%,rgba(16,17,20,.22) 100%),url('https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&w=900&q=85') center/cover no-repeat}
 @media(max-width:700px){.dsp-carousel-track>.mas-product{flex-basis:min(72vw,255px)}.hc-carousel-controls{top:-45px}.hc-service-grid{grid-template-columns:1fr}.dsp-promo-card{padding:30px 24px}.dsp-promo-card--large{min-height:330px}}
 </style>
@@ -2640,6 +2640,17 @@ body.hc-home-mode .ds-brand:hover{color:#fed700!important}
 @media(max-width:700px){
   .dsp-section:has(.dsp-carousel-wrap) .hc-carousel-controls{top:-46px!important}
   .dsp-section:has(.dsp-carousel-wrap) > .dsp-sec-header > .dsp-sec-link{font-size:13px!important}
+}
+</style>
+
+<style id="hugo-fix-imagen-orquesta">
+/* Corrección puntual: imagen de percusión de orquesta. No modifica el resto de la portada. */
+.dsp-promo-card.dsp-promo-card--top {
+  background-color: #111113 !important;
+  background-image: linear-gradient(90deg, rgba(7,7,9,.97) 0%, rgba(7,7,9,.88) 43%, rgba(7,7,9,.08) 100%), url('https://images.unsplash.com/photo-1583459259601-b141d4bbf03e?auto=format&fit=crop&w=1100&q=85') !important;
+  background-size: cover !important;
+  background-position: 70% center !important;
+  background-repeat: no-repeat !important;
 }
 </style>
 </head>
