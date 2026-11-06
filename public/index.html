@@ -2474,6 +2474,28 @@ body.hc-product-mode .shop-control-bar,body.hc-product-mode #archiveProductsGrid
 }
 </style>
     <link rel="stylesheet" href="/admin.css">
+<style id="hc-carousel-update">
+/* Hugo Congas: carruseles arrastrables y sección confianza */
+.dsp-carousel-wrap{position:relative;min-width:0}
+.dsp-carousel-track{display:flex!important;grid-template-columns:none!important;gap:18px;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scroll-snap-type:x proximity;scroll-behavior:smooth;scrollbar-width:thin;scrollbar-color:#666 transparent;padding:5px 2px 17px;cursor:grab;-webkit-overflow-scrolling:touch;touch-action:pan-y pinch-zoom;user-select:none}
+.dsp-carousel-track.is-dragging{cursor:grabbing;scroll-behavior:auto;scroll-snap-type:none}
+.dsp-carousel-track>.mas-product{flex:0 0 clamp(212px,23vw,274px);min-width:0;scroll-snap-align:start;user-select:none}
+.dsp-carousel-track img{-webkit-user-drag:none;user-drag:none;pointer-events:none}
+.hc-carousel-controls{position:absolute;right:5px;top:-52px;display:flex;gap:8px}
+.hc-carousel-arrow{border:1px solid #d9d9d9;border-radius:50%;background:#fff;color:#171717;width:36px;height:36px;cursor:pointer;display:grid;place-items:center;transition:background .2s}
+.hc-carousel-arrow:hover{background:#fed700;border-color:#fed700}
+.hc-carousel-hint{font-size:12px;color:#69717d;margin:2px 0 0}
+.hc-service-kicker{display:block;color:#fed700;font-size:11px;letter-spacing:.09em;font-weight:800;margin-bottom:12px}
+.hc-service-panel .ds-revs__head{align-items:center}
+.hc-service-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:22px}
+.hc-service-grid>div{background:#242424;border:1px solid #383838;border-radius:15px;padding:23px 20px;display:flex;flex-direction:column;gap:10px;color:#fff}
+.hc-service-grid i{color:#fed700;font-size:21px}
+.hc-service-grid strong{font-size:16px}.hc-service-grid span{font-size:13px;color:#c5c5c5;line-height:1.5}
+.dsp-promo-card--large{background:linear-gradient(90deg,rgba(8,9,12,.94) 0%,rgba(8,9,12,.67) 58%,rgba(8,9,12,.12) 100%),url('https://images.unsplash.com/photo-1511192336575-5a79af67a629?auto=format&fit=crop&w=1250&q=85') center/cover no-repeat}
+.dsp-promo-card--top{background:linear-gradient(90deg,#101114 0%,rgba(16,17,20,.90) 47%,rgba(16,17,20,.2) 100%),url('https://images.unsplash.com/photo-1516280440614-37939d6bbacd?auto=format&fit=crop&w=900&q=85') center/cover no-repeat}
+.dsp-promo-card--bottom{background:linear-gradient(90deg,#101114 0%,rgba(16,17,20,.92) 52%,rgba(16,17,20,.22) 100%),url('https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&w=900&q=85') center/cover no-repeat}
+@media(max-width:700px){.dsp-carousel-track>.mas-product{flex-basis:min(72vw,255px)}.hc-carousel-controls{top:-45px}.hc-service-grid{grid-template-columns:1fr}.dsp-promo-card{padding:30px 24px}.dsp-promo-card--large{min-height:330px}}
+</style>
 </head>
 
 <body class="home woocommerce-page archive">
@@ -2745,8 +2767,8 @@ body.hc-product-mode .shop-control-bar,body.hc-product-mode #archiveProductsGrid
         <section class="dsp-section">
             <div class="dsp-sec-header">
                 <div>
-                    <h2 class="dsp-sec-title">Novedades en percusión y cuerdas</h2>
-                    <p class="dsp-sec-sub">Timbales, bongós, baterías electrónicas y guitarras disponibles para compra online y despacho a todo el Perú.</p>
+                    <h2 class="dsp-sec-title">Novedades instrumentales</h2>
+                    <p class="dsp-sec-sub">Descubre instrumentos recién incorporados al catálogo y consulta su disponibilidad para envío a todo el Perú.</p>
                 </div>
                 <a class="dsp-sec-link" href="#catalogo" onclick="filterCatalog('percusion')">
                     <i class="fa-solid fa-angle-right"></i>
@@ -2797,7 +2819,7 @@ body.hc-product-mode .shop-control-bar,body.hc-product-mode #archiveProductsGrid
         <section class="dsp-section">
             <div class="dsp-sec-header">
                 <div>
-                    <h2 class="dsp-sec-title">Audio profesional y estudio</h2>
+                    <h2 class="dsp-sec-title">Audio profesional</h2>
                     <p class="dsp-sec-sub">Micrófonos, consolas e interfaces Shure, RØDE, Yamaha y Focusrite para escenario y grabación.</p>
                 </div>
                 <a class="dsp-sec-link" href="#catalogo" onclick="filterCatalog('audio')">
@@ -2920,7 +2942,7 @@ body.hc-product-mode .shop-control-bar,body.hc-product-mode #archiveProductsGrid
                         <span class="ds-why__kicker">Por qué comprar con nosotros</span>
                         <h2>Compra con la tranquilidad de tratar con músicos especialistas</h2>
                     </div>
-                    <p>Somos una tienda peruana especializada en instrumentos musicales y audio profesional. Probamos, calibramos y te acompañamos antes y después de tu compra.</p>
+                    <p>Somos una tienda peruana especializada en instrumentos musicales y audio profesional. Te ayudamos a encontrar el equipo adecuado antes de tu compra.</p>
                 </div>
 
                 <div class="ds-why__grid">
@@ -2929,14 +2951,14 @@ body.hc-product-mode .shop-control-bar,body.hc-product-mode #archiveProductsGrid
                             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 1.8 3-.2.9 2.9 2.5 1.7-1 2.8 1 2.8-2.5 1.7-.9 2.9-3-.2L12 22l-2.4-1.8-3 .2-.9-2.9-2.5-1.7 1-2.8-1-2.8 2.5-1.7.9-2.9 3 .2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path><path d="M8.5 12.2l2.4 2.3 4.6-4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
                         </div>
                         <h3>Instrumentos 100% originales</h3>
-                        <p>Equipos nuevos de marcas oficiales, con boleta o factura electrónica y número de serie registrado.</p>
+                        <p>Consulta las características y la procedencia de cada producto antes de comprar.</p>
                     </div>
                     <div class="ds-why__card">
                         <div class="ds-why__ic">
                             <svg viewBox="0 0 24 24"><path d="M12 2.5l8 3v6.2c0 4.7-3.3 8.6-8 9.8-4.7-1.2-8-5.1-8-9.8V5.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path><path d="M8.6 12l2.3 2.3 4.5-4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
                         </div>
                         <h3>Garantía y calibración</h3>
-                        <p>6 meses en accesorios y 1 año en instrumentos y consolas. Nosotros mismos gestionamos tu garantía en Lima.</p>
+                        <p>Te informamos las condiciones de garantía aplicables a cada instrumento o equipo.</p>
                     </div>
                     <div class="ds-why__card">
                         <div class="ds-why__ic">
@@ -2955,66 +2977,13 @@ body.hc-product-mode .shop-control-bar,body.hc-product-mode #archiveProductsGrid
                 </div>
 
                 <!-- Bloque de Reseñas en Google (.ds-revs) -->
-                <div class="ds-revs">
-                    <div class="ds-revs__head">
-                        <div class="ds-revs__score">
-                            <span class="ds-revs__num">4.8</span>
-                            <div>
-                                <div class="ds-st" aria-label="4.8 de 5 estrellas">
-                                    <i class="fa-solid fa-star"></i>
-                                    <i class="fa-solid fa-star"></i>
-                                    <i class="fa-solid fa-star"></i>
-                                    <i class="fa-solid fa-star"></i>
-                                    <i class="fa-solid fa-star"></i>
-                                </div>
-                                <span class="ds-revs__count">Opiniones verificadas en Google</span>
-                            </div>
-                        </div>
-                        <div>
-                            <h3>Lo que dicen nuestros músicos y clientes</h3>
-                            <p>Opiniones reales de orquestas, productores y músicos de todo el Perú.</p>
-                        </div>
-                        <div class="ds-rev__btns">
-                            <a class="ds-y" href="https://api.whatsapp.com/send?phone=51916200641&amp;text=Hola%2C%20quisiera%20cotizar%20un%20instrumento" target="_blank" rel="noopener">Cotizar por WhatsApp</a>
-                        </div>
-                    </div>
-
-                    <div class="ds-revs__grid">
-                        <figure class="ds-rv">
-                            <div class="ds-rv__top">
-                                <span class="ds-st"><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i></span>
-                                <span class="ds-rv__src">Google</span>
-                            </div>
-                            <blockquote>“Compré mi set de congas LP Matador y llegaron a Trujillo al día siguiente por Shalom muy bien embaladas. Excelente atención.”</blockquote>
-                            <figcaption>
-                                <span class="ds-rv__av">M</span>
-                                <span><strong>Marco A.</strong><small>Percusionista · Cliente verificado</small></span>
-                            </figcaption>
-                        </figure>
-                        <figure class="ds-rv">
-                            <div class="ds-rv__top">
-                                <span class="ds-st"><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i></span>
-                                <span class="ds-rv__src">Google</span>
-                            </div>
-                            <blockquote>“Me entregaron el bajo Ibanez SR505E calibrado y octavado sin costo adicional. Se nota que conocen de instrumentos profesionales.”</blockquote>
-                            <figcaption>
-                                <span class="ds-rv__av">R</span>
-                                <span><strong>Renzo V.</strong><small>Bajista · Cliente verificado</small></span>
-                            </figcaption>
-                        </figure>
-                        <figure class="ds-rv">
-                            <div class="ds-rv__top">
-                                <span class="ds-st"><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i></span>
-                                <span class="ds-rv__src">Google</span>
-                            </div>
-                            <blockquote>“Pedimos micrófonos Shure SM58 y consola Yamaha con factura RUC 20 para nuestra agrupación. Todo 100% original y rápido.”</blockquote>
-                            <figcaption>
-                                <span class="ds-rv__av">C</span>
-                                <span><strong>Carlos D.</strong><small>Director Musical · Cliente verificado</small></span>
-                            </figcaption>
-                        </figure>
-                    </div>
-                </div>
+                <div class="ds-revs hc-service-panel">
+   <div class="ds-revs__head">
+     <div><span class="hc-service-kicker">HUGO CONGAS · ATENCIÓN ONLINE</span><h3>La música comienza con el equipo correcto.</h3><p>Te orientamos para elegir instrumentos, accesorios y audio profesional según tu proyecto y presupuesto.</p></div>
+     <div class="ds-rev__btns"><a class="ds-y" href="https://wa.me/51916200641?text=Hola%2C%20quiero%20asesor%C3%ADa%20para%20comprar%20instrumentos" target="_blank" rel="noopener noreferrer">Hablar con un asesor</a></div>
+   </div>
+   <div class="hc-service-grid"><div><i class="fa-solid fa-drum"></i><strong>Instrumentos musicales</strong><span>Percusión, guitarras, bajos y teclados</span></div><div><i class="fa-solid fa-microphone-lines"></i><strong>Audio profesional</strong><span>Microfonía, mezcladoras y estudio</span></div><div><i class="fa-solid fa-truck-fast"></i><strong>Envíos a todo el Perú</strong><span>Consulta disponibilidad y despacho</span></div></div>
+ </div>
             </div>
         </section>
 
@@ -4238,5 +4207,51 @@ body.hc-product-mode .shop-control-bar,body.hc-product-mode #archiveProductsGrid
 </script>
 
 <script src="/admin-ui.js" defer></script>
+<script id="hc-layout-and-drag">
+(function(){
+  function moveHomeSections(){
+    const main=document.querySelector('main#content');if(!main)return;
+    const best=document.getElementById('carouselBestSellers')?.closest('section.dsp-section');
+    const news=document.getElementById('carouselNewArrivals')?.closest('section.dsp-section');
+    const audio=document.getElementById('carouselProAudio')?.closest('section.dsp-section');
+    const catalog=document.getElementById('catalogo');
+    const faq=document.getElementById('preguntas-frecuentes');
+    const trust=[...main.children].find(el=>el.classList?.contains('dsp-section')&&el.querySelector('.ds-why'));
+    if(faq&&catalog)faq.insertAdjacentElement('afterend',catalog); // catálogo completo permanece accesible después de la portada
+    if(audio&&trust)audio.insertAdjacentElement('afterend',trust); // imagen 2: ventajas y asesoría
+    if(trust&&faq)trust.insertAdjacentElement('afterend',faq);
+  }
+  function activateDrag(track){
+    if(!track||track.dataset.hcDragReady)return;track.dataset.hcDragReady='1';
+    const wrap=track.closest('.dsp-carousel-wrap');
+    if(wrap){
+      const controls=document.createElement('div');controls.className='hc-carousel-controls';
+      controls.innerHTML='<button type="button" class="hc-carousel-arrow" aria-label="Productos anteriores"><i class="fa-solid fa-chevron-left"></i></button><button type="button" class="hc-carousel-arrow" aria-label="Productos siguientes"><i class="fa-solid fa-chevron-right"></i></button>';
+      wrap.appendChild(controls);
+      const move=(dir)=>track.scrollBy({left:dir*Math.max(220,track.clientWidth*.73),behavior:'smooth'});
+      controls.children[0].addEventListener('click',()=>move(-1));controls.children[1].addEventListener('click',()=>move(1));
+    }
+    let down=false,startX=0,startScroll=0,dragged=false,blockClick=false;
+    track.addEventListener('pointerdown',e=>{
+      if(e.pointerType==='touch'||e.button!==0)return;
+      down=true;dragged=false;startX=e.clientX;startScroll=track.scrollLeft;
+    });
+    window.addEventListener('pointermove',e=>{
+      if(!down)return;
+      const delta=e.clientX-startX;
+      if(Math.abs(delta)>6){dragged=true;track.classList.add('is-dragging');track.scrollLeft=startScroll-delta;}
+    });
+    const finish=()=>{if(!down)return;down=false;track.classList.remove('is-dragging');if(dragged){blockClick=true;setTimeout(()=>{blockClick=false},120)}};
+    window.addEventListener('pointerup',finish);window.addEventListener('pointercancel',finish);window.addEventListener('blur',finish);
+    track.addEventListener('click',e=>{if(blockClick){e.preventDefault();e.stopImmediatePropagation();blockClick=false}},true);
+    track.querySelectorAll('img,a').forEach(el=>el.setAttribute('draggable','false'));
+    new MutationObserver(()=>track.querySelectorAll('img,a').forEach(el=>el.setAttribute('draggable','false'))).observe(track,{childList:true});
+  }
+  document.addEventListener('DOMContentLoaded',()=>{
+    moveHomeSections();
+    ['carouselBestSellers','carouselNewArrivals','carouselProAudio'].forEach(id=>activateDrag(document.getElementById(id)));
+  });
+})();
+</script>
 </body>
 </html>
