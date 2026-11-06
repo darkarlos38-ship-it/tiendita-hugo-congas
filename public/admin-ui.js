@@ -3,11 +3,25 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const api=async(path,method='GET',data)=>{const res=await fetch('/api/'+path,{method,credentials:'same-origin',headers:data?{'Content-Type':'application/json'}:{},body:data?JSON.stringify(data):undefined});const j=await res.json();if(!res.ok)throw Error(j.error||'Error del servidor');return j};
 let editId=null,allProducts=[];
+// Conservar el escaparate de demostración cuando todavía no hay productos reales
+// en una sección. El administrador solo gestiona los productos reales de D1.
+const showcaseExamples = PRODUCTS.map(p=>({...p,id:-Math.abs(Number(p.id))}));
+const showcaseSections = ['bestseller','new','audio'];
+function publicProductsFrom(real){
+ const result=[...real];
+ for(const section of showcaseSections){
+  if(!real.some(p=>p.section===section)){
+   result.push(...showcaseExamples.filter(p=>p.section===section));
+  }
+ }
+ return result;
+}
+
 function message(s){$('hc-admin-msg').textContent=s;}
 function showPanel(){ $('hc-admin-shell').hidden=false; document.body.style.overflow='hidden';checkSession(); }
 function hidePanel(){$('hc-admin-shell').hidden=true;document.body.style.overflow=''}
 async function checkSession(){const s=await api('session');$('hc-login').hidden=s.authenticated;$('hc-workspace').hidden=!s.authenticated;if(s.authenticated){await reloadAdmin()}}
-async function reloadPublic(){try{const data=await api('catalog');PRODUCTS.splice(0,PRODUCTS.length,...data.products);allProducts=data.products; if(data.settings.heroTitle){const h=document.querySelector('.ds-hero h1');if(h)h.textContent=data.settings.heroTitle}if(data.settings.heroText){const p=document.querySelector('.ds-hero__content > p');if(p)p.textContent=data.settings.heroText} $('hc-hero-title').value=data.settings.heroTitle||'';$('hc-hero-text').value=data.settings.heroText||'';renderHomeCarousels();renderArchiveGrid();}catch(e){console.error('No se pudo cargar el catálogo',e)}}
+async function reloadPublic(){try{const data=await api('catalog');const actual=Array.isArray(data.products)?data.products:[];allProducts=actual;PRODUCTS.splice(0,PRODUCTS.length,...publicProductsFrom(actual)); if(data.settings.heroTitle){const h=document.querySelector('.ds-hero h1');if(h)h.textContent=data.settings.heroTitle}if(data.settings.heroText){const p=document.querySelector('.ds-hero__content > p');if(p)p.textContent=data.settings.heroText} $('hc-hero-title').value=data.settings.heroTitle||'';$('hc-hero-text').value=data.settings.heroText||'';renderHomeCarousels();renderArchiveGrid();}catch(e){console.error('No se pudo cargar el catálogo',e)}}
 async function reloadAdmin(){await reloadPublic();$('hc-item-list').innerHTML=allProducts.map(p=>`<div class="hc-ad-row"><span>${esc(p.title)} <small>${esc(p.brand)} · S/ ${Number(p.price).toFixed(2)} · Stock ${p.stock||0}</small></span><button data-edit="${p.id}">Editar</button></div>`).join('');$('hc-item-list').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editProduct(Number(b.dataset.edit)))}
 function resetForm(){editId=null;$('hc-product-form').reset();$('hc-save-product').textContent='Añadir producto';$('hc-delete-product').hidden=true;$('hc-image-preview').removeAttribute('src');$('hc-image-path').value='';$('hc-product-form').querySelector('[name="section"]').value='new';}
 function editProduct(id){const p=allProducts.find(x=>x.id===id);if(!p)return;resetForm();editId=id;for(const k of ['title','brand','category','catLabel','price','oldPrice','stock','desc','section']){const el=$('hc-product-form').elements.namedItem(k);if(el)el.value=p[k]??''}$('hc-image-path').value=p.image||'';if(p.image)$('hc-image-preview').src=p.image;$('hc-save-product').textContent='Guardar cambios';$('hc-delete-product').hidden=false;switchTab('products');$('hc-product-form').scrollIntoView({block:'start',behavior:'smooth'})}
