@@ -1,22 +1,18 @@
-# Tiendita Musical Hugo Congas — Cloudflare SIN R2
+# Hugo Congas — corrección de interfaz y Libro de Reclamaciones
 
-Esta adaptación permite utilizar **Cloudflare Workers + D1** sin activar tarjeta ni R2. Conserva el diseño existente. La tienda y el administrador guardan productos, precios y textos en D1. **Las fotografías NO se suben desde el panel**: se usan direcciones HTTPS públicas, o archivos incluidos en `public/images/` y después referenciados como `/images/foto.jpg`.
+## Archivos a reemplazar en GitHub
+- `public/index.html`: corrige el color de modales/carrito; introduce el formulario de reclamaciones. Conserva el resto del diseño AMOLED.
+- `public/admin-ui.js`: incorpora la configuración legal y la consulta de reclamaciones.
+- `worker.js`: añade endpoints seguros `/api/provider`, `/api/claims` en Cloudflare Worker y registra reclamaciones en D1.
 
-## Configuración (una sola vez)
+## Obligatorio: crear tabla D1
+En Cloudflare → D1 SQL Database → `hugo-congas-db` → Console ejecutar el texto de `claims.sql`. No subas `claims.sql` al directorio public.
 
-1. En Cloudflare → **D1 SQL Database** → `hugo-congas-db` → **Console**, abre `schema.sql` en un editor, copia su contenido completo, pégalo en la consola SQL y ejecútalo. La base debe estar **nueva/vacía**; el script carga productos de demostración. No vuelvas a ejecutarlo innecesariamente.
-2. Sube **los archivos y carpetas dentro de** `hugo-congas-cloudflare/` **a la raíz** del repositorio GitHub `tiendita-hugo-congas`. Sube `worker.js`, `wrangler.jsonc`, `package.json`, `schema.sql`, `README.md` y la carpeta `public` sin agregar una carpeta contenedora extra. `wrangler.jsonc` ya incluye el identificador D1 tomado de la captura de tu cuenta.
-3. En Cloudflare → Workers & Pages → Create application → Connect GitHub → `tiendita-hugo-congas`. Build command vacío, Deploy command `npx wrangler deploy`. Despliega.
-4. En el Worker ya creado → **Settings → Variables and Secrets**, agrega dos variables de tipo **Secret**: `ADMIN_USER` y `ADMIN_PASSWORD` (contraseña **de al menos 12 caracteres**). Nunca publiques las credenciales en GitHub.
-5. Abre la URL `.workers.dev`, entra en **Administrador** y prueba un cambio de precio. Vuelve a cargar para verificar que persista.
+## Datos legales
+Después del despliegue, entra al administrador, completa **razón social/nombre legal**, **RUC de 11 dígitos** y **domicilio legal**. Nunca deben inventarse. Hasta que los completes, el formulario mostrará un error explícito al intentar registrarse.
 
-## Fotos sin R2
+## Comportamiento del Libro
+La página permite registrar digitalmente la hoja, genera código único y ofrece una copia imprimible (guardar PDF usando Imprimir). Los reclamos se conservan en D1, y el administrador puede revisarlos al entrar en su panel. **No hay correo automático**: el titular debe revisar las reclamaciones regularmente y responder al consumidor por correo dentro de 15 días hábiles. Configurar un servicio de correo transaccional será necesario para copia automática vía email. Pide asesoría legal para adecuación final a la regulación peruana.
 
-Para usar una fotografía: súbela a `public/images/` del repositorio y despliega la actualización, o usa un enlace HTTPS de un alojamiento permitido. En el panel, pega la URL, por ejemplo `/images/congas.jpg` y guarda el instrumento. No es posible subir imágenes directamente desde el administrador en esta versión.
-
-## Notas
-- El catálogo inicial es **demostrativo**: verifica productos, precios y existencias antes de abrir al público.
-- Se mantienen el mensaje «Envíos a todo el Perú · Tienda virtual · Atención personalizada online» y WhatsApp 916200641.
-- No contiene pagos reales ni gestión de pedidos.
-- No solicites activar R2: esta versión no lo necesita.
-- Si las tablas D1 aún no existen, el Worker devuelve un error hasta que ejecutes `schema.sql`.
+## Prueba
+`public/index.html` abierto desde disco permite revisar colores, botones y formulario, pero **no enviará reclamos** sin Cloudflare y D1. No publiques datos reales de clientes en GitHub.

@@ -21,6 +21,27 @@ export default {async fetch(req,env){
  if(!p.startsWith('/api/'))return env.ASSETS.fetch(req);
  if(!env.DB)return json({error:'Falta conectar la base de datos D1'},503);
  if(!['GET','HEAD'].includes(method)&&!sameOrigin(req))return json({error:'Origen no autorizado'},403);
+
+ // Datos legales del proveedor: los configura el dueño, nunca se inventan.
+ if(p==='/api/provider'&&method==='GET'){
+  const row=await env.DB.prepare("SELECT value FROM appdata WHERE key='provider'").first();
+  const pv=row?JSON.parse(row.value):{};return json({legalName:pv.legalName||'',ruc:pv.ruc||'',address:pv.address||''});
+ }
+ if(p==='/api/claims'&&method==='POST'){
+  const row=await env.DB.prepare("SELECT value FROM appdata WHERE key='provider'").first(),pv=row?JSON.parse(row.value):{};
+  if(!pv.legalName||!/^\d{11}$/.test(pv.ruc||'')||!pv.address)return json({error:'El proveedor debe configurar su razón social, RUC y domicilio en el administrador antes de recibir reclamaciones.'},503);
+  const o=await requestJson(req);
+  const fields=['nombres','apellidos','documento_tipo','documento','correo','telefono','domicilio','departamento','distrito','bien_tipo','monto','bien_descripcion','tipo','detalle','pedido'];
+  if(fields.some(k=>typeof o[k]!=='string' || !o[k].trim()))return json({error:'Completa todos los campos obligatorios'},400);
+  if(o.menor&&(!o.representante||typeof o.representante!=='string'))return json({error:'Faltan los datos del representante'},400);
+  if(!o.acepta||!['Reclamo','Queja'].includes(o.tipo)||!['Producto','Servicio'].includes(o.bien_tipo)||!['DNI','CE','Pasaporte','Otro'].includes(o.documento_tipo))return json({error:'Datos de reclamación inválidos'},400);
+  if(!/^\S+@\S+\.\S+$/.test(o.correo)||String(o.correo).length>160||String(o.detalle).length<12||String(o.pedido).length<5||!Number.isFinite(Number(o.monto))||Number(o.monto)<0)return json({error:'Revisa correo, monto y descripción de tu reclamación'},400);
+  if(fields.some(k=>String(o[k]).length>4500))return json({error:'Texto demasiado largo'},400);
+  const timestamp=new Date().toISOString();const payload={};for(const k of [...fields,'representante'])payload[k]=clean(o[k],4500);payload.menor=!!o.menor;
+  const id=crypto.randomUUID(),number='HC-'+timestamp.slice(0,10).replace(/-/g,'')+'-'+id.slice(0,8).toUpperCase();
+  await env.DB.prepare('INSERT INTO claims(id,number,created_at,details,status) VALUES(?,?,?,?,?)').bind(id,number,timestamp,JSON.stringify(payload),'Pendiente').run();
+  return json({ok:true,number,date:timestamp,provider:{legalName:pv.legalName,ruc:pv.ruc,address:pv.address}},201);
+ }
  if(p==='/api/catalog'&&method==='GET')return json(await data(env));
  if(p==='/api/session'&&method==='GET')return json({authenticated:await auth(req,env)});
  if(p==='/api/login'&&method==='POST'){
@@ -33,6 +54,16 @@ export default {async fetch(req,env){
    return json({ok:true},200,{'Set-Cookie':`hc_admin=${token}; HttpOnly; SameSite=Strict; Secure; Path=/; Max-Age=28800`});
  }
  if(!await auth(req,env))return json({error:'Inicia sesión como administrador'},401);
+
+ if(p==='/api/provider'&&method==='PUT'){
+   const x=await requestJson(req),legalName=clean(x.legalName,200).trim(),ruc=clean(x.ruc,11).trim(),address=clean(x.address,300).trim();
+   if(!legalName||!/^\d{11}$/.test(ruc)||!address)return json({error:'Completa razón social, RUC de 11 dígitos y domicilio legal'},400);
+   await env.DB.prepare("INSERT INTO appdata(key,value) VALUES('provider',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(JSON.stringify({legalName,ruc,address})).run();return json({ok:true});
+ }
+ if(p==='/api/claims'&&method==='GET'){
+   const rows=await env.DB.prepare('SELECT id,number,created_at,details,status FROM claims ORDER BY created_at DESC LIMIT 200').all();
+   return json({claims:rows.results.map(r=>({...r,details:JSON.parse(r.details)}))});
+ }
  if(p==='/api/logout'&&method==='POST'){
    await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await digest(cookie(req))).run();
    return json({ok:true},200,{'Set-Cookie':'hc_admin=; HttpOnly; SameSite=Strict; Secure; Path=/; Max-Age=0'});
