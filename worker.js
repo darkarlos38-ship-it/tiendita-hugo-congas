@@ -3,7 +3,7 @@ const enc = new TextEncoder();
 const security = {'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'strict-origin-when-cross-origin','Content-Security-Policy':"frame-ancestors 'none'"};
 const json=(v,status=200,extra={})=>new Response(JSON.stringify(v),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...security,...extra}});
 const clean=(v,n=5000)=>String(v??'').replace(/[<>]/g,'').slice(0,n);
-const isImage=v=>typeof v==='string'&&(v.startsWith('/images/')&&/^\/images\/[a-zA-Z0-9._/-]+$/.test(v)||/^https:\/\/[^\s<>"']+$/i.test(v));
+const isImage=v=>typeof v==='string'&&((v.startsWith('/images/')&&/^\/images\/[a-zA-Z0-9._/-]+$/.test(v))||(v.startsWith('/media/')&&/^\/media\/[a-zA-Z0-9._/-]+$/.test(v))||/^https:\/\/[^\s<>"']+$/i.test(v));
 const cookie=r=>(r.headers.get('cookie')||'').match(/(?:^|;\s*)hc_admin=([^;]+)/)?.[1]||'';
 const hex=u=>Array.from(u).map(b=>b.toString(16).padStart(2,'0')).join('');
 const digest=async s=>hex(new Uint8Array(await crypto.subtle.digest('SHA-256',enc.encode(s))));
@@ -18,6 +18,13 @@ function sameOrigin(req){const o=req.headers.get('origin');return !o||o===new UR
 export default {async fetch(req,env){
  const url=new URL(req.url),p=url.pathname,method=req.method;
  try{
+ if(p.startsWith('/media/') && method==='GET' && env.MEDIA_BUCKET){
+   const key=p.slice('/media/'.length);
+   if(!/^[a-zA-Z0-9._/-]+$/.test(key))return new Response('No encontrado',{status:404});
+   const object=await env.MEDIA_BUCKET.get(key);
+   if(!object)return new Response('No encontrado',{status:404});
+   return new Response(object.body,{headers:{'Content-Type':object.httpMetadata?.contentType||'image/jpeg','Cache-Control':'public,max-age=3600','X-Content-Type-Options':'nosniff'}});
+ }
  if(!p.startsWith('/api/'))return env.ASSETS.fetch(req);
  if(!env.DB)return json({error:'Falta conectar la base de datos D1'},503);
  if(!['GET','HEAD'].includes(method)&&!sameOrigin(req))return json({error:'Origen no autorizado'},403);
@@ -63,6 +70,37 @@ export default {async fetch(req,env){
  if(p==='/api/claims'&&method==='GET'){
    const rows=await env.DB.prepare('SELECT id,number,created_at,details,status FROM claims ORDER BY created_at DESC LIMIT 200').all();
    return json({claims:rows.results.map(r=>({...r,details:JSON.parse(r.details)}))});
+ }
+ // Edición visual: fotografías de banners y modificaciones a instrumentos de demostración.
+ if(p==='/api/inline-media'&&method==='PUT'){
+  const v=await requestJson(req),key=String(v.key||'');
+  if(!['hero','promoLarge','promoTop','promoBottom','faq'].includes(key))return json({error:'Sección desconocida'},400);
+  if(v.image!==''&&!isImage(v.image))return json({error:'Usa una URL HTTPS válida o una imagen alojada en la tienda'},400);
+  const db=await data(env);db.settings.inlineMedia??={};db.settings.inlineMedia[key]=v.image;await save(env,db);return json({ok:true});
+ }
+ if(p==='/api/demo'&&method==='PUT'){
+  const o=await requestJson(req),id=String(o.id||'');
+  if(!/^-\d{1,10}$/.test(id))return json({error:'Producto de ejemplo inválido'},400);
+  const db=await data(env);db.settings.demoOverrides??={};
+  if(o.action==='hide'){db.settings.demoOverrides[id]={hidden:true}}
+  else if(o.action==='save'){
+   const input=o.changes||{},patch={};
+   for(const k of ['title','brand','category','catLabel','desc','section'])if(typeof input[k]==='string')patch[k]=clean(input[k],k==='desc'?2000:180);
+   for(const k of ['price','oldPrice','stock'])if(input[k]!==undefined){const n=Number(input[k]);if(!Number.isFinite(n)||n<0)return json({error:'Precio o stock inválido'},400);patch[k]=n}
+   if(input.image!==undefined){if(input.image!==''&&!isImage(input.image))return json({error:'URL de fotografía inválida'},400);patch.image=input.image}
+   db.settings.demoOverrides[id]={...(db.settings.demoOverrides[id]||{}),...patch,hidden:false};
+  }else return json({error:'Acción desconocida'},400);
+  await save(env,db);return json({ok:true});
+ }
+ if(p==='/api/image-upload'&&method==='POST'){
+  if(!env.MEDIA_BUCKET)return json({error:'La carga de fotos desde el dispositivo estará disponible cuando actives R2 y conectemos MEDIA_BUCKET. Por ahora utiliza el enlace HTTPS de una imagen.'},503);
+  const form=await req.formData();const photo=form.get('image');
+  if(!photo||typeof photo==='string'||photo.size>3_000_000||photo.size===0)return json({error:'Selecciona una imagen de hasta 3 MB'},400);
+  const types={'image/jpeg':'jpg','image/png':'png','image/webp':'webp'};
+  if(!types[photo.type])return json({error:'Usa JPG, PNG o WebP'},400);
+  const key='products/'+crypto.randomUUID()+'.'+types[photo.type];
+  await env.MEDIA_BUCKET.put(key,await photo.arrayBuffer(),{httpMetadata:{contentType:photo.type}});
+  return json({ok:true,url:'/media/'+key});
  }
  if(p==='/api/logout'&&method==='POST'){
    await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await digest(cookie(req))).run();
