@@ -68,6 +68,38 @@ export default {async fetch(req,env){
   await env.DB.prepare("UPDATE izipay_test_orders SET status='TOKEN_CREATED' WHERE id=?").bind(orderId).run();
   return json({mode:'test',orderId,amount,currency:'PEN',formToken:result.answer.formToken,publicKey:env.IZIPAY_TEST_PUBLIC_KEY});
  }
+ if(p==='/api/izipay/checkout-test'&&method==='POST'){
+  if(!env.IZIPAY_TEST_USER||!env.IZIPAY_TEST_PASSWORD||!env.IZIPAY_TEST_PUBLIC_KEY||!env.IZIPAY_TEST_HMAC)
+    return json({error:'Izipay de pruebas no está configurado'},503);
+  const x=await requestJson(req);
+  if(!Array.isArray(x.items)||x.items.length===0||x.items.length>20)return json({error:'Selecciona de 1 a 20 instrumentos'},400);
+  const name=clean(x.name,120).trim(),email=clean(x.email,160).trim(),phone=clean(x.phone,30).trim(),address=clean(x.address,300).trim(),district=clean(x.district,100).trim();
+  if(name.length<3||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!/^[+\d\s()-]{7,25}$/.test(phone)||address.length<5||district.length<2)return json({error:'Completa nombres, correo, teléfono, dirección y distrito'},400);
+  const db=await data(env),selected=[],seen=new Set();let amount=0;
+  for(const p of x.items){
+    const id=String(p.id||''),qty=Number(p.qty);
+    if(!/^\d{1,12}$/.test(id)||seen.has(id)||!Number.isSafeInteger(qty)||qty<1||qty>10)return json({error:'Instrumentos o cantidades inválidas'},400);
+    seen.add(id);const product=db.products.find(q=>String(q.id)===id);
+    if(!product)return json({error:'El carrito contiene artículos demostrativos o ya no disponibles. Solo se pueden pagar instrumentos reales registrados.'},400);
+    const unit=Math.round(Number(product.price)*100);
+    if(!Number.isSafeInteger(unit)||unit<=0||!Number.isSafeInteger(Number(product.stock))||Number(product.stock)<qty)return json({error:'Precio o stock no disponible para '+clean(product.title,80)},400);
+    const subtotal=unit*qty;amount+=subtotal;
+    if(!Number.isSafeInteger(amount)||amount>20000000)return json({error:'Importe de prueba fuera del límite'},400);
+    selected.push({id,title:clean(product.title,120),qty,unit_cents:unit,subtotal_cents:subtotal});
+  }
+  // TEST ONLY: no shipping fee, reservation or real charge. Delivery cost must be quoted before production.
+  const orderId='HC-CHECK-T-'+Date.now().toString(36).toUpperCase()+'-'+crypto.randomUUID().slice(0,8).toUpperCase();
+  await env.DB.prepare('INSERT INTO izipay_checkout_test_orders(id,items_json,amount_cents,name,email,phone,address,district,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .bind(orderId,JSON.stringify(selected),amount,name,email,phone,address,district,'PENDING',new Date().toISOString()).run();
+  const basic=btoa(env.IZIPAY_TEST_USER+':'+env.IZIPAY_TEST_PASSWORD);
+  let reply;
+  try{reply=await fetch('https://api.micuentaweb.pe/api-payment/V4/Charge/CreatePayment',{method:'POST',headers:{Authorization:'Basic '+basic,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({amount,currency:'PEN',orderId,customer:{email}}),signal:AbortSignal.timeout(12000)});}
+  catch(e){console.error('Izipay test checkout request failed',String(e));return json({error:'No se pudo conectar a Izipay de pruebas'},502)}
+  let payload;try{payload=await reply.json()}catch{return json({error:'Respuesta no válida de Izipay'},502)}
+  if(!reply.ok||payload.status!=='SUCCESS'||!payload.answer?.formToken){console.error('Izipay test checkout rejected',reply.status,payload.errorCode||'');return json({error:'Izipay no generó el formulario de prueba'},502)}
+  await env.DB.prepare("UPDATE izipay_checkout_test_orders SET status='TOKEN_CREATED' WHERE id=?").bind(orderId).run();
+  return json({mode:'test',orderId,amount,currency:'PEN',items:selected,formToken:payload.answer.formToken,publicKey:env.IZIPAY_TEST_PUBLIC_KEY});
+ }
  if(p==='/api/izipay/ipn'&&method==='POST'){
   if(!env.IZIPAY_TEST_PASSWORD)return json({error:'Pago no configurado'},503);
   const form=await req.formData(); const answer=form.get('kr-answer'),mac=form.get('kr-hash');
@@ -77,15 +109,18 @@ export default {async fetch(req,env){
   if(expected.length!==mac.length||!expected.split('').every((c,i)=>c===mac.toLowerCase()[i]))return json({error:'Firma inválida'},403);
   let a;try{a=JSON.parse(answer)}catch{return json({error:'Respuesta ilegible'},400)}
   const orderId=String(a.orderDetails?.orderId||a.orderId||'');
-  const row=await env.DB.prepare('SELECT amount_cents,status FROM izipay_test_orders WHERE id=?').bind(orderId).first();
+  const checkout=orderId.startsWith('HC-CHECK-T-');
+  const table=checkout?'izipay_checkout_test_orders':'izipay_test_orders';
+  const row=checkout?await env.DB.prepare('SELECT amount_cents,status FROM izipay_checkout_test_orders WHERE id=?').bind(orderId).first():await env.DB.prepare('SELECT amount_cents,status FROM izipay_test_orders WHERE id=?').bind(orderId).first();
   if(!row)return json({error:'Pedido no encontrado'},404);
   const paid=String(a.orderStatus||'')==='PAID';
   // A signed IPN is not sufficient unless its amount and currency match our authoritative D1 order.
   const sum=Number(a.orderDetails?.orderTotalAmount);
   const currency=String(a.orderDetails?.orderCurrency||a.currency||'');
   if(paid&&sum===row.amount_cents&&currency==='PEN'){
-    await env.DB.prepare("UPDATE izipay_test_orders SET status='PAID_TEST',paid_at=? WHERE id=? AND status!='PAID_TEST'")
-      .bind(new Date().toISOString(),orderId).run();
+    const paidAt=new Date().toISOString();
+    if(checkout)await env.DB.prepare("UPDATE izipay_checkout_test_orders SET status='PAID_TEST',paid_at=? WHERE id=? AND status!='PAID_TEST'").bind(paidAt,orderId).run();
+    else await env.DB.prepare("UPDATE izipay_test_orders SET status='PAID_TEST',paid_at=? WHERE id=? AND status!='PAID_TEST'").bind(paidAt,orderId).run();
   }else if(paid){console.error('Izipay signed IPN mismatch',orderId);return json({error:'Monto o moneda no coincide'},409)}
   return new Response('OK',{status:200,headers:{'Content-Type':'text/plain; charset=utf-8'}});
  }
