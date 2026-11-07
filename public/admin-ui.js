@@ -71,6 +71,20 @@ function ensureInlineEditor(){
  .hc-inline-dialog input:focus,.hc-inline-dialog select:focus{outline:2px solid #ffda00}
  .hc-inline-dialog .hc-preview-photo{height:150px;max-width:100%;object-fit:contain;border-radius:9px;background:#202020}
  .hc-inline-dialog small,.hc-inline-dialog .hc-inline-status{color:#ddd;line-height:1.5}
+ .hc-gallery-editor{border-top:1px solid #3e3e3e;padding-top:10px;margin-top:6px}
+ .hc-gallery-editor-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:9px 0}
+ .hc-gallery-admin-tile{background:#202020;border:1px solid #444;border-radius:9px;overflow:hidden}
+ .hc-gallery-admin-tile>img{width:100%;aspect-ratio:1.15;object-fit:contain}
+ .hc-gallery-tile-actions{display:flex;gap:2px;justify-content:space-around;padding:3px}
+ .hc-gallery-tile-actions button{padding:5px 8px!important;background:#2e2e2e!important}
+ .hc-gallery-tile-actions button:disabled{opacity:.3;cursor:default}
+ .hc-gallery-customer{display:grid;gap:10px;align-content:start;min-width:0}
+ .hc-gallery-customer .hc-detail-image{min-height:275px}
+ .hc-gallery-thumbs{display:flex;gap:8px;flex-wrap:wrap}
+ .hc-gallery-thumbs button{width:65px;height:65px;background:#171717;border:1px solid #555;border-radius:9px;cursor:pointer;padding:4px}
+ .hc-gallery-thumbs button[aria-pressed="true"]{border:2px solid #ffd600}
+ .hc-gallery-thumbs img{width:100%;height:100%;object-fit:contain}
+
  .hc-inline-dialog .hc-inline-actions{display:flex;gap:8px;flex-wrap:wrap}
  body.hc-inline-mode .mas-product,body.hc-inline-mode .dsp-prod-card{outline:1px dashed #8d7613}
  @media(max-width:600px){.hc-inline-toolbar{bottom:8px;width:calc(100vw - 20px)}.hc-inline-controls{right:4px;top:4px}.hc-inline-controls button{padding:5px!important;font-size:11px!important}}
@@ -135,19 +149,50 @@ function inlinePhotoControls(body,url=''){
 }
 function openInlineDialog(title){ensureInlineEditor();$('hc-inline-title').textContent=title;$('hc-inline-dialog').hidden=false;const body=$('hc-inline-body');body.replaceChildren();return body;}
 function addInlineStatus(body){const p=document.createElement('p');p.className='hc-inline-status';p.setAttribute('aria-live','polite');body.appendChild(p);return p}
+// Galería adicional de cada instrumento: máximo 8 fotos, manteniendo su fotografía principal.
+function buildGalleryEditor(parent,initial){
+ const box=document.createElement('section');box.className='hc-gallery-editor';
+ box.innerHTML='<h3 style="margin:9px 0;color:#fff">Fotos adicionales</h3><p style="font-size:12px;color:#bbb">Hasta 8 fotografías. Puedes quitarlas o cambiar su orden. La primera foto de arriba sigue siendo la portada del instrumento.</p><div class="hc-gallery-editor-grid"></div><label style="display:grid;gap:6px">+ Añadir fotos desde el equipo <input type="file" accept="image/jpeg,image/png,image/webp" multiple></label>';
+ parent.appendChild(box);
+ const entries=(Array.isArray(initial)?initial:[]).map(url=>({url}));
+ const grid=box.querySelector('.hc-gallery-editor-grid');const inp=box.querySelector('input');
+ function redraw(){grid.replaceChildren();entries.forEach((o,i)=>{const el=document.createElement('div');el.className='hc-gallery-admin-tile';const img=document.createElement('img');img.src=o.url||o.preview;img.alt='Foto adicional '+(i+1);el.appendChild(img);const row=document.createElement('div');row.className='hc-gallery-tile-actions';const left=document.createElement('button');left.type='button';left.textContent='←';left.title='Mover a la izquierda';left.disabled=i===0;left.onclick=()=>{[entries[i-1],entries[i]]=[entries[i],entries[i-1]];redraw()};const right=document.createElement('button');right.type='button';right.textContent='→';right.title='Mover a la derecha';right.disabled=i===entries.length-1;right.onclick=()=>{[entries[i+1],entries[i]]=[entries[i],entries[i+1]];redraw()};const del=document.createElement('button');del.type='button';del.textContent='✕';del.title='Quitar esta foto';del.onclick=()=>{if(o.preview)URL.revokeObjectURL(o.preview);entries.splice(i,1);redraw()};row.append(left,right,del);el.appendChild(row);grid.appendChild(el)});}
+ inp.onchange=()=>{const files=Array.from(inp.files||[]);if(entries.length+files.length>8){alert('Puedes guardar un máximo de 8 fotos adicionales por instrumento.');inp.value='';return}for(const f of files){if(!['image/jpeg','image/png','image/webp'].includes(f.type)||f.size===0||f.size>3000000){alert('Cada foto debe ser JPG, PNG o WebP de hasta 3 MB.');inp.value='';return}}for(const file of files)entries.push({file,preview:URL.createObjectURL(file)});inp.value='';redraw()};redraw();
+ return {uploadPending:async()=>{const result=[];for(const o of entries){const url=o.file?await uploadInlinePhoto(o.file):o.url;result.push(url)}return result}};
+}
+
 function editInlineProduct(id){
  const p=PRODUCTS.find(x=>Number(x.id)===id);if(!p)return;
  const body=openInlineDialog('Editar instrumento en la portada');const getPhoto=inlinePhotoControls(body,p.image||'');
  const form=document.createElement('form');form.style.display='grid';form.style.gap='10px';
  form.innerHTML='<label>Nombre<input name="title" required maxlength="180" value="'+esc(p.title)+'"></label><label>Marca<input name="brand" required value="'+esc(p.brand)+'"></label><label>Precio S/<input name="price" type="number" min="0" step="0.01" required value="'+Number(p.price)+'"></label><label>Precio anterior S/<input name="oldPrice" type="number" min="0" step="0.01" value="'+Number(p.oldPrice||p.price)+'"></label><label>Stock<input name="stock" type="number" min="0" step="1" value="'+Number(p.stock||0)+'"></label><label>Descripción<textarea name="desc" rows="3">'+esc(p.desc||'')+'</textarea></label><div class="hc-inline-actions"><button class="primary" type="submit">Guardar cambios</button><button id="hc-inline-delete" type="button">Eliminar instrumento</button></div>';
- body.appendChild(form);const status=addInlineStatus(body);
- form.onsubmit=async e=>{e.preventDefault();status.textContent='Subiendo fotografía y guardando...';try{const changes=Object.fromEntries(new FormData(form));changes.image=await getPhoto();await updateInlineProduct(id,changes);await reloadAdmin();status.textContent='Guardado correctamente en Cloudflare D1';$('hc-inline-dialog').hidden=true}catch(err){status.textContent=err.message}};
+ body.appendChild(form);const gal=buildGalleryEditor(body,p.gallery||[]);const status=addInlineStatus(body);
+ form.onsubmit=async e=>{e.preventDefault();status.textContent='Subiendo fotografías y guardando...';try{const changes=Object.fromEntries(new FormData(form));changes.image=await getPhoto();changes.gallery=await gal.uploadPending();await updateInlineProduct(id,changes);await reloadAdmin();status.textContent='Guardado correctamente en Cloudflare D1';$('hc-inline-dialog').hidden=true}catch(err){status.textContent=err.message}};
  form.querySelector('#hc-inline-delete').onclick=async()=>{if(!confirm('¿Eliminar este instrumento del escaparate?'))return;try{if(id<0)await api('demo','PUT',{id,action:'hide'});else await api('products/'+id,'DELETE');await reloadAdmin();$('hc-inline-dialog').hidden=true}catch(err){status.textContent=err.message}};
 }
 function editInlineBanner(key){
  const body=openInlineDialog('Cambiar imagen de la portada');const saved=inlineSettings.inlineMedia?.[key];const getPhoto=inlinePhotoControls(body,saved||'');
  const save=document.createElement('button');save.type='button';save.className='primary';save.textContent='Guardar imagen';body.appendChild(save);const status=addInlineStatus(body);
  save.onclick=async()=>{status.textContent='Subiendo fotografía y guardando...';try{const image=await getPhoto();if(!image)throw Error('Escribe la URL de la fotografía o selecciona un archivo');await api('inline-media','PUT',{key,image});await reloadPublic();$('hc-inline-dialog').hidden=true}catch(err){status.textContent=err.message}};
+}
+
+function renderCustomerGallery(){
+ const detail=document.getElementById('hc-inline-detail');
+ if(!detail||detail.hidden)return;
+ const imgWrap=detail.querySelector('.hc-detail-image');if(!imgWrap)return;
+ const id=Number((typeof PRODUCTS!=='undefined'&&Array.isArray(PRODUCTS)?PRODUCTS:[]).find(p=>p.title===detail.querySelector('.hc-detail-name')?.textContent)?.id);
+ const p=PRODUCTS.find(x=>Number(x.id)===id);if(!p)return;
+ const photos=[p.image,...(Array.isArray(p.gallery)?p.gallery:[])].filter(Boolean);
+ if(photos.length<2)return;
+ const key=String(id)+'|'+photos.join('|');if(imgWrap.dataset.hcGalleryKey===key)return;
+ imgWrap.dataset.hcGalleryKey=key;
+ let container=imgWrap.parentElement;
+ if(!container.classList.contains('hc-gallery-customer')){const outer=document.createElement('div');outer.className='hc-gallery-customer';imgWrap.parentNode.insertBefore(outer,imgWrap);outer.appendChild(imgWrap);container=outer}
+ container.querySelector('.hc-gallery-thumbs')?.remove();
+ const main=document.createElement('img');main.src=photos[0];main.alt=p.title;main.style.cssText='max-width:100%;max-height:360px;width:100%;height:auto;object-fit:contain';imgWrap.replaceChildren(main);
+ const thumbs=document.createElement('div');thumbs.className='hc-gallery-thumbs';thumbs.setAttribute('aria-label','Galería de fotos del instrumento');
+ photos.forEach((url,i)=>{const b=document.createElement('button');b.type='button';b.setAttribute('aria-label','Mostrar fotografía '+(i+1));b.setAttribute('aria-pressed',String(i===0));const im=document.createElement('img');im.src=url;im.alt='Miniatura '+(i+1);b.appendChild(im);b.onclick=()=>{main.src=url;Array.from(thumbs.children).forEach((node,j)=>node.setAttribute('aria-pressed',String(i===j)))};thumbs.appendChild(b)});
+ container.appendChild(thumbs);
 }
 
 window.addEventListener('DOMContentLoaded',async()=>{
@@ -162,7 +207,7 @@ window.addEventListener('DOMContentLoaded',async()=>{
  $('hc-settings-form').onsubmit=async e=>{e.preventDefault();try{await api('settings','PUT',{heroTitle:$('hc-hero-title').value,heroText:$('hc-hero-text').value});await reloadPublic();message('Textos actualizados')}catch(err){message(err.message)}};
  await reloadPublic();
  const main=document.querySelector('main#content')||document.body;
- new MutationObserver(()=>{if(inlineMode)queueInlineControls()}).observe(main,{subtree:true,childList:true});
+ new MutationObserver(()=>{if(inlineMode)queueInlineControls();renderCustomerGallery()}).observe(main,{subtree:true,childList:true});
  if(window.__HC_PREVIEW__)setInlineMode(true);
 });
 })();
