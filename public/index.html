@@ -3372,6 +3372,9 @@ body.hc-home-mode .ds-brand:hover{color:#fed700!important}
                     <span id="cartTotalAmount">S/ 0.00</span>
                 </div>
                 <div style="display:grid; gap:10px;">
+                    <button type="button" onclick="hcCheckoutTest()" id="hc-checkout-test-button" class="dsp-quote-box__btn" style="border:1px solid #ffd600;background:#151515!important;color:#ffd600!important">
+                        <span style="color:#ffd600!important">Pagar con Izipay — PRUEBA (sin cobro real)</span>
+                    </button>
                     <button type="button" onclick="sendCartWhatsApp()" class="dsp-quote-box__btn" style="border:0; cursor:pointer;">
                         <i class="fa-brands fa-whatsapp" style="color:#25D366; font-size:18px;"></i>
                         <span>Finalizar o Cotizar Pedido por WhatsApp</span>
@@ -4284,6 +4287,11 @@ body.hc-home-mode .ds-brand:hover{color:#fed700!important}
             document.getElementById('cartModal').classList.remove('is-open');
         }
 
+        function hcCheckoutTest(){
+            if(!cart.length){alert('Agrega primero un instrumento al carrito.');return;}
+            try{sessionStorage.setItem('hc_checkout_test_cart',JSON.stringify(cart.map(x=>({id:x.id,qty:x.qty}))));window.location.href='/checkout-prueba.html';}
+            catch(e){alert('No se pudo preparar el carrito. Actualiza la página.');}
+        }
         function sendCartWhatsApp() {
             if (cart.length === 0) {const list=document.getElementById('cartItemsList');if(list)list.innerHTML='<p style="color:#e4e4e9;text-align:center">Añade un instrumento antes de solicitar una cotización.</p>';return;}
             let total = 0;
