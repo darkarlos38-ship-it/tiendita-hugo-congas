@@ -344,6 +344,69 @@ export default {async fetch(req,env){
   return json({mode:'staging',livePaymentsEnabled:false,released:Number(result.meta?.changes||0),notice:'Solo se liberaron reservas vencidas. No hubo cobro ni descuento de stock público.'});
  }
 
+ // ENSAYO DE CONSUMO DE STOCK: solo pedidos TEST firmados. NO cambia el catálogo público.
+ // El INSERT condicional es una única sentencia D1, evitando doble asiento incluso con concurrencia.
+ if(p==='/api/izipay/staging-settlement'&&method==='GET'){
+  if(!await auth(req,env))return json({error:'Solo administrador'},401);
+  const paid=await env.DB.prepare(`SELECT o.id,o.amount_cents,o.paid_at,o.items_json,h.expires_at
+    FROM izipay_staging_checkout_orders o LEFT JOIN izipay_stock_reservations_stage h ON h.id=o.hold_id
+    WHERE o.status='PAID_TEST' ORDER BY o.paid_at DESC LIMIT 30`).all();
+  const settled=await env.DB.prepare(`SELECT order_id,created_at FROM izipay_inventory_settlements_test ORDER BY created_at DESC LIMIT 100`).all();
+  const done=new Set((settled.results||[]).map(r=>r.order_id));
+  return json({mode:'staging',livePaymentsEnabled:false,shippingCents:0,
+   orders:(paid.results||[]).map(o=>({id:o.id,amountCents:o.amount_cents,
+    paidAt:o.paid_at,reservationExpiresAt:o.expires_at,
+    eligible:Boolean(o.paid_at&&o.expires_at&&o.paid_at<=o.expires_at),
+    simulatedDebitRecorded:done.has(o.id)})),
+   notice:'Un asiento de ensayo no cambia el stock visible ni autoriza el envío de mercadería.'});
+ }
+ if(p==='/api/izipay/staging-settlement'&&method==='POST'){
+  if(!await auth(req,env))return json({error:'Solo administrador'},401);
+  const x=await requestJson(req),orderId=String(x.orderId||'');
+  if(!/^HC-STAGE-T-[0-9a-f-]{36}$/.test(orderId))return json({error:'Identificador de pedido TEST inválido'},400);
+  const order=await env.DB.prepare(`SELECT o.id,o.status,o.amount_cents,o.paid_at,o.items_json,h.expires_at
+    FROM izipay_staging_checkout_orders o JOIN izipay_stock_reservations_stage h ON h.id=o.hold_id
+    WHERE o.id=?`).bind(orderId).first();
+  if(!order)return json({error:'Pedido de ensayo no encontrado'},404);
+  if(order.status!=='PAID_TEST'||!order.paid_at||!order.expires_at||order.paid_at>order.expires_at)
+   return json({error:'No hay pago TEST confirmado dentro de una reserva válida. Revisar manualmente.'},409);
+  let items;try{items=JSON.parse(order.items_json)}catch{return json({error:'Artículos no válidos'},409)}
+  if(!Array.isArray(items)||items.length<1||items.length>20)return json({error:'Artículos no válidos'},409);
+  const ids=new Set();let amount=0;
+  for(const it of items){
+   const id=String(it.id||''),qty=Number(it.qty),unit=Number(it.unit_cents);
+   if(!/^\d{1,12}$/.test(id)||ids.has(id)||!Number.isSafeInteger(qty)||qty<1||qty>10||!Number.isSafeInteger(unit)||unit<1)
+    return json({error:'Pedido contiene artículos inválidos'},409);
+   ids.add(id);amount+=qty*unit;
+  }
+  if(amount!==order.amount_cents)return json({error:'El importe TEST del pedido no coincide'},409);
+  const canonical=JSON.stringify(items),existing=await env.DB.prepare('SELECT order_id FROM izipay_inventory_settlements_test WHERE order_id=?').bind(orderId).first();
+  if(existing)return json({mode:'staging',status:'SIMULATED_DEBIT',alreadyRecorded:true,livePaymentsEnabled:false});
+  const now=new Date().toISOString();
+  // Atomicidad: no consume stock público. Calcula disponibilidad contra asientos de ensayo anteriores.
+  const sql=`INSERT INTO izipay_inventory_settlements_test(order_id,items_json,created_at)
+    SELECT ?,?,? WHERE NOT EXISTS (
+     SELECT 1 FROM json_each(?) requested
+     LEFT JOIN json_each((SELECT value FROM appdata WHERE key='catalog'),'$.products') product
+       ON CAST(json_extract(product.value,'$.id') AS TEXT)=CAST(json_extract(requested.value,'$.id') AS TEXT)
+     WHERE product.value IS NULL
+       OR CAST(json_extract(product.value,'$.stock') AS INTEGER) <
+         CAST(json_extract(requested.value,'$.qty') AS INTEGER) +
+         COALESCE((SELECT SUM(CAST(json_extract(used.value,'$.qty') AS INTEGER))
+           FROM izipay_inventory_settlements_test s, json_each(s.items_json) used
+           WHERE CAST(json_extract(used.value,'$.id') AS TEXT)=CAST(json_extract(requested.value,'$.id') AS TEXT)),0)
+    )`;
+  try{
+   const result=await env.DB.prepare(sql).bind(orderId,canonical,now,canonical).run();
+   if(result.meta?.changes===1)return json({mode:'staging',status:'SIMULATED_DEBIT',alreadyRecorded:false,livePaymentsEnabled:false,notice:'Asiento de ensayo registrado; stock público intacto.'},201);
+  }catch(e){
+   const dup=await env.DB.prepare('SELECT order_id FROM izipay_inventory_settlements_test WHERE order_id=?').bind(orderId).first();
+   if(dup)return json({mode:'staging',status:'SIMULATED_DEBIT',alreadyRecorded:true,livePaymentsEnabled:false});
+   throw e;
+  }
+  return json({error:'No hay stock suficiente para simular el descuento. Requiere revisión, no despachar.'},409);
+ }
+
  // Panel privado de preproducción: no acepta ni inicia cobros reales.
  if(p==='/api/izipay/production-readiness'&&method==='GET'){
   if(!await auth(req,env))return json({error:'Solo administrador'},401);
