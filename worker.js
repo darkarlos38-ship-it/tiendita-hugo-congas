@@ -146,6 +146,23 @@ export default {async fetch(req,env){
   return json({ok:true,number,date:timestamp,provider:{legalName:pv.legalName,ruc:pv.ruc,address:pv.address}},201);
  }
  if(p==='/api/catalog'&&method==='GET')return json(await data(env));
+
+ // Panel privado de preproducción: no acepta ni inicia cobros reales.
+ if(p==='/api/izipay/production-readiness'&&method==='GET'){
+  if(!await auth(req,env))return json({error:'Solo administrador'},401);
+  const keys=['IZIPAY_PROD_USER','IZIPAY_PROD_PASSWORD','IZIPAY_PROD_PUBLIC_KEY','IZIPAY_PROD_HMAC'];
+  const present=Object.fromEntries(keys.map(k=>[k,Boolean(env[k])]));
+  const tables=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('izipay_checkout_test_orders','izipay_live_orders')").all();
+  const found=new Set((tables.results||[]).map(x=>x.name));
+  return json({phase:'PREPRODUCCION',livePaymentsEnabled:false,keysConfigured:present,
+   d1LiveOrdersTable:found.has('izipay_live_orders'),testCheckoutTable:found.has('izipay_checkout_test_orders'),
+   r2Connected:Boolean(env.MEDIA_BUCKET),
+   pending:['Definir y mostrar gastos de envío antes del pago','Reservar stock de forma atómica','Proteger contra solicitudes repetidas y pagos duplicados','Implementar y probar IPN de producción con clave de producción, separada de TEST','Conciliación de transacciones, reembolsos y pedidos rechazados','Pruebas de producción de bajo importe autorizadas por el titular'],
+   warning:'Todavía no se pueden cobrar tarjetas reales. Las credenciales de producción no significan que el flujo esté habilitado.'});
+ }
+ if(p==='/api/izipay/checkout-live'&&method==='POST'){
+  return json({error:'Los pagos reales están desactivados. No se ha iniciado ningún cobro.',mode:'disabled'},503);
+ }
  if(p==='/api/session'&&method==='GET')return json({authenticated:await auth(req,env)});
  if(p==='/api/login'&&method==='POST'){
    if(!env.ADMIN_USER||!env.ADMIN_PASSWORD||env.ADMIN_PASSWORD.length<12)return json({error:'Configura los secretos ADMIN_USER y ADMIN_PASSWORD en Cloudflare'},503);
