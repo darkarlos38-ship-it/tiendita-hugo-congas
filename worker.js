@@ -100,6 +100,72 @@ export default {async fetch(req,env){
   await env.DB.prepare("UPDATE izipay_checkout_test_orders SET status='TOKEN_CREATED' WHERE id=?").bind(orderId).run();
   return json({mode:'test',orderId,amount,currency:'PEN',items:selected,formToken:payload.answer.formToken,publicKey:env.IZIPAY_TEST_PUBLIC_KEY});
  }
+ // Integración de ensayo completa: reserva atómica -> token Izipay TEST -> IPN firmado.
+ // Acceso exclusivamente de administrador; NO habilita cobros reales ni descuenta catálogo público.
+ if(p==='/api/izipay/staging-checkout'&&method==='POST'){
+  if(!await auth(req,env))return json({error:'Solo administrador'},401);
+  if(!env.IZIPAY_TEST_USER||!env.IZIPAY_TEST_PASSWORD||!env.IZIPAY_TEST_PUBLIC_KEY||!env.IZIPAY_TEST_HMAC)return json({error:'Izipay TEST no configurado'},503);
+  const x=await requestJson(req),idempotencyKey=String(x.idempotencyKey||'');
+  if(!/^[a-zA-Z0-9_-]{16,80}$/.test(idempotencyKey))return json({error:'Identificador de pedido inválido'},400);
+  if(!Array.isArray(x.items)||x.items.length<1||x.items.length>20)return json({error:'Carrito inválido'},400);
+  const name=clean(x.name,120).trim(),email=clean(x.email,160).trim(),phone=clean(x.phone,30).trim(),address=clean(x.address,300).trim(),district=clean(x.district,100).trim();
+  if(name.length<3||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!/^[+\d\s()-]{7,25}$/.test(phone)||address.length<5||district.length<2)return json({error:'Datos del comprador incompletos'},400);
+  const products=(await data(env)).products,selected=[],seen=new Set();let amount=0;
+  for(const entry of x.items){
+   const id=String(entry?.id||''),qty=Number(entry?.qty);
+   if(!/^\d{1,12}$/.test(id)||seen.has(id)||!Number.isSafeInteger(qty)||qty<1||qty>10)return json({error:'Productos o cantidades inválidas'},400);
+   seen.add(id);const product=products.find(e=>String(e.id)===id);
+   if(!product)return json({error:'Instrumento no encontrado'},409);
+   const unit=Math.round(Number(product.price)*100);
+   if(!Number.isSafeInteger(unit)||unit<=0||!Number.isSafeInteger(Number(product.stock))||product.stock<qty)return json({error:'Precio o existencias insuficientes'},409);
+   amount+=unit*qty;if(!Number.isSafeInteger(amount)||amount>20000000)return json({error:'Importe fuera de rango'},400);
+   selected.push({id,qty,unit_cents:unit,title:clean(product.title,100)});
+  }
+  selected.sort((a,b)=>a.id.localeCompare(b.id,'en',{numeric:true}));
+  const itemsJson=JSON.stringify(selected),hash=await digest(itemsJson+'|'+name+'|'+email+'|'+phone+'|'+district+'|'+address);
+  const prev=await env.DB.prepare('SELECT id,request_hash,status FROM izipay_staging_checkout_orders WHERE idempotency_key=?').bind(idempotencyKey).first();
+  if(prev)return json({error:prev.request_hash===hash?'Pedido ya creado: '+prev.id+'. No se vuelve a cobrar.':'La clave ya se usó para otra compra',orderId:prev.id,status:prev.status},409);
+  const now=new Date(),nowISO=now.toISOString(),until=new Date(now.getTime()+10*60*1000).toISOString();
+  const orderId='HC-STAGE-T-'+crypto.randomUUID(),holdId='HC-HOLD-'+crypto.randomUUID();
+  const reserveSQL=`INSERT INTO izipay_stock_reservations_stage
+    (id,idempotency_key,request_hash,items_json,status,created_at,expires_at)
+    SELECT ?,?,?,?,'RESERVED',?,?
+    WHERE NOT EXISTS (
+      SELECT 1 FROM json_each(?) requested
+      LEFT JOIN json_each((SELECT value FROM appdata WHERE key='catalog'),'$.products') product
+        ON CAST(json_extract(product.value,'$.id') AS TEXT)=CAST(json_extract(requested.value,'$.id') AS TEXT)
+      WHERE product.value IS NULL
+      OR CAST(json_extract(product.value,'$.stock') AS INTEGER) <
+        CAST(json_extract(requested.value,'$.qty') AS INTEGER) +
+        COALESCE((SELECT SUM(CAST(json_extract(held.value,'$.qty') AS INTEGER))
+          FROM izipay_stock_reservations_stage res,json_each(res.items_json) held
+          WHERE res.status='RESERVED' AND res.expires_at>?
+          AND CAST(json_extract(held.value,'$.id') AS TEXT)=CAST(json_extract(requested.value,'$.id') AS TEXT)),0)
+      OR CAST(ROUND(CAST(json_extract(product.value,'$.price') AS REAL)*100) AS INTEGER) !=
+        CAST(json_extract(requested.value,'$.unit_cents') AS INTEGER)
+    )`;
+  const reserved=await env.DB.prepare(reserveSQL).bind(holdId,'checkout_'+idempotencyKey,hash,itemsJson,nowISO,until,itemsJson,nowISO).run();
+  if(reserved.meta?.changes!==1)return json({error:'Stock reservado por otro cliente o precio modificado'},409);
+  try{
+   await env.DB.prepare('INSERT INTO izipay_staging_checkout_orders (id,idempotency_key,request_hash,hold_id,items_json,amount_cents,buyer_json,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)')
+     .bind(orderId,idempotencyKey,hash,holdId,itemsJson,amount,JSON.stringify({name,email,phone,address,district}),'PENDING',nowISO).run();
+  }catch(e){await env.DB.prepare("UPDATE izipay_stock_reservations_stage SET status='RELEASED' WHERE id=?").bind(holdId).run();
+   const existing=await env.DB.prepare('SELECT id FROM izipay_staging_checkout_orders WHERE idempotency_key=?').bind(idempotencyKey).first();
+   return json({error:existing?'Pedido ya creado. No repitas el pago.':'Error al guardar pedido',orderId:existing?.id||null},409)}
+  const basic=btoa(env.IZIPAY_TEST_USER+':'+env.IZIPAY_TEST_PASSWORD);let reply,payload;
+  try{reply=await fetch('https://api.micuentaweb.pe/api-payment/V4/Charge/CreatePayment',{method:'POST',headers:{Authorization:'Basic '+basic,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({amount,currency:'PEN',orderId,customer:{email}}),signal:AbortSignal.timeout(12000)});payload=await reply.json();}
+  catch(e){console.error('Izipay staging checkout request failed',String(e));await env.DB.prepare("UPDATE izipay_staging_checkout_orders SET status='TOKEN_ERROR' WHERE id=?").bind(orderId).run();await env.DB.prepare("UPDATE izipay_stock_reservations_stage SET status='RELEASED' WHERE id=?").bind(holdId).run();return json({error:'Izipay TEST no respondió. No repitas con otra clave sin revisar el pedido.'},502)}
+  if(!reply.ok||payload.status!=='SUCCESS'||!payload.answer?.formToken){await env.DB.prepare("UPDATE izipay_staging_checkout_orders SET status='TOKEN_ERROR' WHERE id=?").bind(orderId).run();await env.DB.prepare("UPDATE izipay_stock_reservations_stage SET status='RELEASED' WHERE id=?").bind(holdId).run();return json({error:'Izipay TEST rechazó la creación del formulario'},502)}
+  await env.DB.prepare("UPDATE izipay_staging_checkout_orders SET status='TOKEN_CREATED' WHERE id=? AND status='PENDING'").bind(orderId).run();
+  return json({mode:'test',orderId,amount,shippingCents:0,currency:'PEN',reservationExpiresAt:until,formToken:payload.answer.formToken,publicKey:env.IZIPAY_TEST_PUBLIC_KEY});
+ }
+ if(p==='/api/izipay/staging-checkout-status'&&method==='GET'){
+  if(!await auth(req,env))return json({error:'Solo administrador'},401);
+  const id=url.searchParams.get('id')||'';
+  if(!/^HC-STAGE-T-[0-9a-f-]{36}$/.test(id))return json({error:'Pedido inválido'},400);
+  const r=await env.DB.prepare('SELECT id,status,amount_cents,paid_at,hold_id FROM izipay_staging_checkout_orders WHERE id=?').bind(id).first();
+  return r?json({id:r.id,status:r.status,amountCents:r.amount_cents,paidAt:r.paid_at,livePaymentsEnabled:false}):json({error:'Pedido no encontrado'},404);
+ }
  if(p==='/api/izipay/ipn'&&method==='POST'){
   if(!env.IZIPAY_TEST_PASSWORD)return json({error:'Pago no configurado'},503);
   const form=await req.formData(); const answer=form.get('kr-answer'),mac=form.get('kr-hash');
@@ -109,6 +175,25 @@ export default {async fetch(req,env){
   if(expected.length!==mac.length||!expected.split('').every((c,i)=>c===mac.toLowerCase()[i]))return json({error:'Firma inválida'},403);
   let a;try{a=JSON.parse(answer)}catch{return json({error:'Respuesta ilegible'},400)}
   const orderId=String(a.orderDetails?.orderId||a.orderId||'');
+  if(orderId.startsWith('HC-STAGE-T-')){
+   const row=await env.DB.prepare('SELECT amount_cents,status,hold_id FROM izipay_staging_checkout_orders WHERE id=?').bind(orderId).first();
+   if(!row)return json({error:'Pedido staging no encontrado'},404);
+   const paid=String(a.orderStatus||'')==='PAID';
+   const sum=Number(a.orderDetails?.orderTotalAmount),currency=String(a.orderDetails?.orderCurrency||a.currency||'');
+   if(paid&&(sum!==row.amount_cents||currency!=='PEN'))return json({error:'Importe o moneda no coinciden'},409);
+   if(paid){
+    // Comprobación defensiva: si la reserva caducó, no dar por surtido el pedido.
+    const hold=await env.DB.prepare('SELECT status,expires_at FROM izipay_stock_reservations_stage WHERE id=?').bind(row.hold_id).first();
+    const next=hold?.status==='RESERVED'&&hold.expires_at>new Date().toISOString()?'PAID_TEST':'REVIEW_REQUIRED';
+    await env.DB.prepare("UPDATE izipay_staging_checkout_orders SET status=?,paid_at=? WHERE id=? AND status IN ('PENDING','TOKEN_CREATED')").bind(next,new Date().toISOString(),orderId).run();
+    // La reserva no se consume en el stock público. Se libera en este laboratorio.
+    await env.DB.prepare("UPDATE izipay_stock_reservations_stage SET status='RELEASED' WHERE id=? AND status='RESERVED'").bind(row.hold_id).run();
+   }else if(['UNPAID','ABANDONED','CANCELLED'].includes(String(a.orderStatus||''))){
+    await env.DB.prepare("UPDATE izipay_staging_checkout_orders SET status='NOT_PAID' WHERE id=? AND status IN ('PENDING','TOKEN_CREATED')").bind(orderId).run();
+    await env.DB.prepare("UPDATE izipay_stock_reservations_stage SET status='RELEASED' WHERE id=? AND status='RESERVED'").bind(row.hold_id).run();
+   }
+   return new Response('OK',{status:200,headers:{'Content-Type':'text/plain; charset=utf-8'}});
+  }
   const checkout=orderId.startsWith('HC-CHECK-T-');
   const table=checkout?'izipay_checkout_test_orders':'izipay_test_orders';
   const row=checkout?await env.DB.prepare('SELECT amount_cents,status FROM izipay_checkout_test_orders WHERE id=?').bind(orderId).first():await env.DB.prepare('SELECT amount_cents,status FROM izipay_test_orders WHERE id=?').bind(orderId).first();
