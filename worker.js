@@ -30,7 +30,65 @@ export default {async fetch(req,env){
  }
  if(!p.startsWith('/api/'))return env.ASSETS.fetch(req);
  if(!env.DB)return json({error:'Falta conectar la base de datos D1'},503);
- if(!['GET','HEAD'].includes(method)&&!sameOrigin(req))return json({error:'Origen no autorizado'},403);
+ if(!['GET','HEAD'].includes(method)&&p!=='/api/izipay/ipn'&&!sameOrigin(req))return json({error:'Origen no autorizado'},403);
+
+
+ // IZIPAY ONLINE: TEST ONLY. No real-money charges in this integration.
+ if(p==='/api/izipay/config'&&method==='GET')return json({mode:'test',ready:!!(env.IZIPAY_TEST_USER&&env.IZIPAY_TEST_PASSWORD&&env.IZIPAY_TEST_PUBLIC_KEY&&env.IZIPAY_TEST_HMAC),production:false});
+ if(p==='/api/izipay/create'&&method==='POST'){
+  if(!env.IZIPAY_TEST_USER||!env.IZIPAY_TEST_PASSWORD||!env.IZIPAY_TEST_PUBLIC_KEY||!env.IZIPAY_TEST_HMAC)
+    return json({error:'Falta configurar credenciales de prueba Izipay en Cloudflare'},503);
+  const x=await requestJson(req);
+  const productId=String(x.productId||''),quantity=Number(x.quantity),email=String(x.email||'').trim();
+  if(!/^\d{1,12}$/.test(productId)||!Number.isSafeInteger(quantity)||quantity<1||quantity>5||!/^\S+@\S+\.\S+$/.test(email)||email.length>160)
+    return json({error:'Revisa el producto, cantidad y correo'},400);
+  const db=await data(env),prod=db.products.find(q=>String(q.id)===productId);
+  if(!prod)return json({error:'Solo se pueden probar productos reales registrados en el administrador; no los de demostración'},400);
+  const unit=Math.round(Number(prod.price)*100);
+  if(!Number.isSafeInteger(unit)||unit<=0||!Number.isFinite(prod.stock)||prod.stock<quantity)return json({error:'Producto sin stock o sin precio válido'},400);
+  const amount=unit*quantity;
+  if(!Number.isSafeInteger(amount)||amount>20000000)return json({error:'Monto fuera del rango de prueba'},400);
+  const orderId='HC-T-'+Date.now().toString(36).toUpperCase()+'-'+crypto.randomUUID().slice(0,8).toUpperCase();
+  const now=new Date().toISOString();
+  await env.DB.prepare('INSERT INTO izipay_test_orders (id,product_id,quantity,amount_cents,email,status,created_at) VALUES(?,?,?,?,?,?,?)')
+    .bind(orderId,productId,quantity,amount,email,'PENDING',now).run();
+  const basic=btoa(env.IZIPAY_TEST_USER+':'+env.IZIPAY_TEST_PASSWORD);
+  const payload={amount,currency:'PEN',orderId,customer:{email}};
+  const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),12000);
+  let reply;
+  try{reply=await fetch('https://api.micuentaweb.pe/api-payment/V4/Charge/CreatePayment',{
+   method:'POST',headers:{'Authorization':'Basic '+basic,'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload),signal:ctl.signal});}
+  catch(e){console.error('Izipay test API network error',String(e));return json({error:'No se pudo conectar al entorno de prueba Izipay'},502)}
+  finally{clearTimeout(timer)}
+  let result;try{result=await reply.json()}catch{return json({error:'Respuesta inesperada de Izipay'},502)}
+  if(!reply.ok||result.status!=='SUCCESS'||!result.answer?.formToken){
+   console.error('Izipay test CreatePayment rejected',reply.status,result.errorCode||'',result.errorMessage||'');
+   return json({error:'Izipay no generó el formulario de pruebas. Revisa las credenciales de test.'},502);
+  }
+  await env.DB.prepare("UPDATE izipay_test_orders SET status='TOKEN_CREATED' WHERE id=?").bind(orderId).run();
+  return json({mode:'test',orderId,amount,currency:'PEN',formToken:result.answer.formToken,publicKey:env.IZIPAY_TEST_PUBLIC_KEY});
+ }
+ if(p==='/api/izipay/ipn'&&method==='POST'){
+  if(!env.IZIPAY_TEST_PASSWORD)return json({error:'Pago no configurado'},503);
+  const form=await req.formData(); const answer=form.get('kr-answer'),mac=form.get('kr-hash');
+  if(typeof answer!=='string'||typeof mac!=='string'||answer.length>50000||!/(^[0-9a-f]{64}$)/i.test(mac))return json({error:'Notificación inválida'},400);
+  const key=await crypto.subtle.importKey('raw',enc.encode(env.IZIPAY_TEST_PASSWORD),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  const expected=hex(new Uint8Array(await crypto.subtle.sign('HMAC',key,enc.encode(answer))));
+  if(expected.length!==mac.length||!expected.split('').every((c,i)=>c===mac.toLowerCase()[i]))return json({error:'Firma inválida'},403);
+  let a;try{a=JSON.parse(answer)}catch{return json({error:'Respuesta ilegible'},400)}
+  const orderId=String(a.orderDetails?.orderId||a.orderId||'');
+  const row=await env.DB.prepare('SELECT amount_cents,status FROM izipay_test_orders WHERE id=?').bind(orderId).first();
+  if(!row)return json({error:'Pedido no encontrado'},404);
+  const paid=String(a.orderStatus||'')==='PAID';
+  // A signed IPN is not sufficient unless its amount and currency match our authoritative D1 order.
+  const sum=Number(a.orderDetails?.orderTotalAmount);
+  const currency=String(a.orderDetails?.orderCurrency||a.currency||'');
+  if(paid&&sum===row.amount_cents&&currency==='PEN'){
+    await env.DB.prepare("UPDATE izipay_test_orders SET status='PAID_TEST',paid_at=? WHERE id=? AND status!='PAID_TEST'")
+      .bind(new Date().toISOString(),orderId).run();
+  }else if(paid){console.error('Izipay signed IPN mismatch',orderId);return json({error:'Monto o moneda no coincide'},409)}
+  return new Response('OK',{status:200,headers:{'Content-Type':'text/plain; charset=utf-8'}});
+ }
 
  // Datos legales del proveedor: los configura el dueño, nunca se inventan.
  if(p==='/api/provider'&&method==='GET'){

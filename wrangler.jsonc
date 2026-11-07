@@ -3,6 +3,9 @@
   "name": "tiendita-hugo-congas",
   "main": "worker.js",
   "compatibility_date": "2026-11-01",
+  "vars": {
+    "ADMIN_USER": "administrador"
+  },
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
