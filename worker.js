@@ -297,8 +297,18 @@ export default {async fetch(req,env){
   if(!await auth(req,env))return json({error:'Solo administrador'},401);
   const x=await requestJson(req),id=String(x.id||'');
   if(!/^HC-HOLD-[0-9a-f-]{36}$/.test(id))return json({error:'Reserva inválida'},400);
-  const r=await env.DB.prepare("UPDATE izipay_stock_reservations_stage SET status='RELEASED' WHERE id=? AND status='RESERVED'").bind(id).run();
-  return json({ok:true,changed:r.meta?.changes||0});
+  // No permitir liberar manualmente reservas de operaciones en pago, pagadas o en revisión.
+  // Una reserva liberada prematuramente podría causar una confirmación tardía insegura.
+  const r=await env.DB.prepare(`
+    UPDATE izipay_stock_reservations_stage SET status='RELEASED'
+    WHERE id=? AND status='RESERVED'
+      AND NOT EXISTS (
+        SELECT 1 FROM izipay_staging_checkout_orders o
+        WHERE o.hold_id=izipay_stock_reservations_stage.id
+          AND o.status IN ('PENDING','TOKEN_CREATED','PAID_TEST','REVIEW_REQUIRED')
+      )`).bind(id).run();
+  return json({ok:true,changed:r.meta?.changes||0,
+    notice:r.meta?.changes?'Reserva de ensayo liberada.':'No se liberó: no existe, ya estaba liberada o está vinculada a un pedido en proceso, pagado o en revisión.'});
  }
 
  // MONITOR DE PREPRODUCCIÓN. Acceso administrador, lecturas mínimas y limpieza segura.
@@ -313,9 +323,9 @@ export default {async fetch(req,env){
     FROM izipay_staging_checkout_orders o
     LEFT JOIN izipay_stock_reservations_stage h ON h.id=o.hold_id
     ORDER BY o.created_at DESC LIMIT 30`).bind(now).all();
-  const orders=(result.results||[]).map(r=>({id:r.id,status:r.status,amountCents:r.amount_cents,createdAt:r.created_at,paidAt:r.paid_at,holdId:r.hold_id,holdStatus:r.hold_status,expiresAt:r.expires_at,expired:Boolean(r.hold_expired),needsAttention:r.status==='REVIEW_REQUIRED'||(r.hold_expired&&['TOKEN_CREATED','PENDING'].includes(r.status))}));
+  const orders=(result.results||[]).map(r=>({id:r.id,status:r.status,amountCents:r.amount_cents,createdAt:r.created_at,paidAt:r.paid_at,holdId:r.hold_id,holdStatus:r.hold_status,holdDisplay:r.status==='PAID_TEST'&&r.hold_status==='RELEASED'?'LIBERADA_TEST_PAGO_CONFIRMADO':r.hold_status,expiresAt:r.expires_at,expired:Boolean(r.hold_expired),needsAttention:r.status==='REVIEW_REQUIRED'||(r.hold_expired&&['TOKEN_CREATED','PENDING'].includes(r.status))}));
   const counts={paidTest:orders.filter(o=>o.status==='PAID_TEST').length,review:orders.filter(o=>o.needsAttention).length,open:orders.filter(o=>['TOKEN_CREATED','PENDING'].includes(o.status)).length,declined:orders.filter(o=>['NOT_PAID','TOKEN_ERROR'].includes(o.status)).length};
-  return json({mode:'staging',livePaymentsEnabled:false,shippingCents:0,counts,orders,notice:'Solo últimos 30 pedidos. Los estados de Izipay se confirman exclusivamente con IPN firmado.'});
+  return json({mode:'staging',livePaymentsEnabled:false,shippingCents:0,counts,orders,notice:'Solo últimos 30 pedidos. En TEST, una reserva RELEASED de un pedido PAID_TEST es esperada: el stock público no se descuenta. No indica reembolso ni anulación del pago.'});
  }
  if(p==='/api/izipay/staging-monitor/expire'&&method==='POST'){
   if(!await auth(req,env))return json({error:'Solo administrador'},401);
