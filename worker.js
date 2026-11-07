@@ -18,12 +18,13 @@ function sameOrigin(req){const o=req.headers.get('origin');return !o||o===new UR
 export default {async fetch(req,env){
  const url=new URL(req.url),p=url.pathname,method=req.method;
  try{
- if(p.startsWith('/media/') && method==='GET' && env.MEDIA_BUCKET){
+ if(p.startsWith('/media/') && method==='GET'){
+   if(!env.MEDIA_BUCKET)return new Response('Almacenamiento de imágenes no conectado',{status:503});
    const key=p.slice('/media/'.length);
    if(!/^[a-zA-Z0-9._/-]+$/.test(key))return new Response('No encontrado',{status:404});
    const object=await env.MEDIA_BUCKET.get(key);
    if(!object)return new Response('No encontrado',{status:404});
-   return new Response(object.body,{headers:{'Content-Type':object.httpMetadata?.contentType||'image/jpeg','Cache-Control':'public,max-age=3600','X-Content-Type-Options':'nosniff'}});
+   return new Response(object.body,{headers:{'Content-Type':object.httpMetadata?.contentType||'application/octet-stream','Cache-Control':'public,max-age=31536000,immutable','X-Content-Type-Options':'nosniff','Cross-Origin-Resource-Policy':'same-origin'}});
  }
  if(!p.startsWith('/api/'))return env.ASSETS.fetch(req);
  if(!env.DB)return json({error:'Falta conectar la base de datos D1'},503);
@@ -93,14 +94,24 @@ export default {async fetch(req,env){
   await save(env,db);return json({ok:true});
  }
  if(p==='/api/image-upload'&&method==='POST'){
-  if(!env.MEDIA_BUCKET)return json({error:'La carga de fotos desde el dispositivo estará disponible cuando actives R2 y conectemos MEDIA_BUCKET. Por ahora utiliza el enlace HTTPS de una imagen.'},503);
+  if(!env.MEDIA_BUCKET)return json({error:'R2 aún no está enlazado. Crea hugo-congas-media y configura el binding MEDIA_BUCKET.'},503);
+  const max=3_000_000;
+  const declared=Number(req.headers.get('content-length')||0);
+  if(declared>max+100_000)return json({error:'La fotografía supera el máximo de 3 MB'},413);
+  const ct=req.headers.get('content-type')||'';
+  if(!ct.toLowerCase().startsWith('multipart/form-data;'))return json({error:'Envía una fotografía con el formulario'},415);
   const form=await req.formData();const photo=form.get('image');
-  if(!photo||typeof photo==='string'||photo.size>3_000_000||photo.size===0)return json({error:'Selecciona una imagen de hasta 3 MB'},400);
+  if(!(photo instanceof File)||photo.size===0||photo.size>max)return json({error:'Selecciona una imagen JPG, PNG o WebP de hasta 3 MB'},400);
   const types={'image/jpeg':'jpg','image/png':'png','image/webp':'webp'};
-  if(!types[photo.type])return json({error:'Usa JPG, PNG o WebP'},400);
-  const key='products/'+crypto.randomUUID()+'.'+types[photo.type];
-  await env.MEDIA_BUCKET.put(key,await photo.arrayBuffer(),{httpMetadata:{contentType:photo.type}});
-  return json({ok:true,url:'/media/'+key});
+  const ext=types[photo.type];if(!ext)return json({error:'Solo se aceptan fotografías JPG, PNG o WebP'},415);
+  const bytes=new Uint8Array(await photo.arrayBuffer());
+  const jpeg=bytes.length>3&&bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff;
+  const png=bytes.length>7&&[137,80,78,71,13,10,26,10].every((n,i)=>bytes[i]===n);
+  const webp=bytes.length>11&&String.fromCharCode(...bytes.slice(0,4))==='RIFF'&&String.fromCharCode(...bytes.slice(8,12))==='WEBP';
+  if(!(ext==='jpg'&&jpeg||ext==='png'&&png||ext==='webp'&&webp))return json({error:'El contenido del archivo no coincide con su formato'},400);
+  const key='products/'+crypto.randomUUID()+'.'+ext;
+  await env.MEDIA_BUCKET.put(key,bytes,{httpMetadata:{contentType:photo.type}});
+  return json({ok:true,url:'/media/'+key},201);
  }
  if(p==='/api/logout'&&method==='POST'){
    await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await digest(cookie(req))).run();

@@ -14,5 +14,11 @@
       "database_name": "hugo-congas-db",
       "database_id": "b49b1658-9618-44a7-a623-5d6b22c19a85"
     }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "hugo-congas-media"
+    }
   ]
 }
