@@ -407,6 +407,35 @@ export default {async fetch(req,env){
   return json({error:'No hay stock suficiente para simular el descuento. Requiere revisión, no despachar.'},409);
  }
 
+ // Puente de inventario: revisión de disponibilidad real (solo lectura, sin cargos).
+ if(p==='/api/izipay/inventory-audit'&&method==='GET'){
+  if(!await auth(req,env))return json({error:'Solo administrador'},401);
+  const db=await data(env);
+  const products=Array.isArray(db.products)?db.products:[];
+  const stageOrders=await env.DB.prepare(`SELECT o.id,o.status,o.paid_at,o.items_json,h.expires_at
+    FROM izipay_staging_checkout_orders o LEFT JOIN izipay_stock_reservations_stage h ON h.id=o.hold_id
+    ORDER BY o.created_at DESC LIMIT 100`).all();
+  const settlements=await env.DB.prepare(`SELECT order_id,items_json,created_at
+    FROM izipay_inventory_settlements_test ORDER BY created_at DESC LIMIT 100`).all();
+  const settled=new Set((settlements.results||[]).map(x=>x.order_id));
+  const issueList=[];
+  for(const order of stageOrders.results||[]){
+   if(order.status!=='PAID_TEST')continue;
+   let items=[];try{items=JSON.parse(order.items_json)}catch{issueList.push({id:order.id,problem:'Artículos ilegibles'});continue}
+   if(!order.expires_at||!order.paid_at||order.paid_at>order.expires_at){issueList.push({id:order.id,problem:'Confirmación fuera de reserva'});continue}
+   if(!settled.has(order.id))issueList.push({id:order.id,problem:'Confirmado TEST sin ensayo de descuento'});
+   for(const it of items){if(!products.some(x=>String(x.id)===String(it.id)))issueList.push({id:order.id,problem:'Producto ya no existe en catálogo'});}
+  }
+  const productRows=products.map(product=>({id:String(product.id),title:clean(product.title,100),
+   stock:Math.max(0,Math.floor(Number(product.stock)||0)),priceCents:Math.round(Number(product.price)*100),
+   note:'Stock público en appdata.catalog: editor actual lo modifica directamente. No tiene bloqueo transaccional de producción.'}));
+  return json({phase:'INVENTORY_AUDIT_ONLY',livePaymentsEnabled:false,realStockDebitsEnabled:false,
+   shippingCents:0,products:productRows,issues:issueList.slice(0,50),
+   checks:{catalogCount:products.length,paidTestOrders:(stageOrders.results||[]).filter(x=>x.status==='PAID_TEST').length,
+    simulatedDebits:(settlements.results||[]).length},
+   next:'Pendiente migrar inventario desde JSON de catálogo a filas independientes con actualización atómica y sincronizar el editor. No se ha realizado ningún descuento público.'});
+ }
+
  // Panel privado de preproducción: no acepta ni inicia cobros reales.
  if(p==='/api/izipay/production-readiness'&&method==='GET'){
   if(!await auth(req,env))return json({error:'Solo administrador'},401);
