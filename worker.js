@@ -147,17 +147,86 @@ export default {async fetch(req,env){
  }
  if(p==='/api/catalog'&&method==='GET')return json(await data(env));
 
+ // PREPRODUCCION — ensayo admin de reservas de stock. NO solicita pagos reales ni modifica stock público.
+ if(p==='/api/izipay/staging-stock'&&method==='GET'){
+  if(!await auth(req,env))return json({error:'Solo administrador'},401);
+  const now=new Date().toISOString();
+  const rows=await env.DB.prepare("SELECT id,items_json,status,expires_at,created_at FROM izipay_stock_reservations_stage ORDER BY created_at DESC LIMIT 15").all();
+  return json({mode:'staging',shippingCents:0,livePaymentsEnabled:false,reservations:(rows.results||[]).map(r=>({id:r.id,items:JSON.parse(r.items_json),status:r.status==='RESERVED'&&r.expires_at<=now?'EXPIRED':r.status,expiresAt:r.expires_at,createdAt:r.created_at}))});
+ }
+ if(p==='/api/izipay/staging-stock'&&method==='POST'){
+  if(!await auth(req,env))return json({error:'Solo administrador'},401);
+  const x=await requestJson(req),idempotencyKey=String(x.idempotencyKey||'');
+  if(!/^[a-zA-Z0-9_-]{16,80}$/.test(idempotencyKey))return json({error:'Identificador único inválido (16 a 80 caracteres)'},400);
+  if(!Array.isArray(x.items)||x.items.length<1||x.items.length>20)return json({error:'Selecciona entre 1 y 20 instrumentos'},400);
+  const products=(await data(env)).products,seen=new Set(),selected=[];let amount=0;
+  for(const entry of x.items){
+   const id=String(entry?.id||''),qty=Number(entry?.qty);
+   if(!/^\d{1,12}$/.test(id)||seen.has(id)||!Number.isSafeInteger(qty)||qty<1||qty>10)return json({error:'Productos o cantidades inválidas'},400);
+   seen.add(id);const product=products.find(e=>String(e.id)===id);
+   if(!product)return json({error:'Producto inexistente; no se aceptan artículos de demostración'},409);
+   const unit=Math.round(Number(product.price)*100);
+   if(!Number.isSafeInteger(unit)||unit<1||!Number.isSafeInteger(Number(product.stock))||product.stock<0)return json({error:'Precio o stock inválido'},409);
+   amount+=unit*qty;if(!Number.isSafeInteger(amount)||amount>20000000)return json({error:'Importe fuera de rango'},400);
+   selected.push({id,qty,unit_cents:unit,title:clean(product.title,100)});
+  }
+  selected.sort((a,b)=>a.id.localeCompare(b.id,'en',{numeric:true}));
+  const itemsJson=JSON.stringify(selected),hash=await digest(itemsJson);
+  const current=await env.DB.prepare('SELECT id,request_hash,items_json,status,expires_at FROM izipay_stock_reservations_stage WHERE idempotency_key=?').bind(idempotencyKey).first();
+  if(current){if(current.request_hash!==hash)return json({error:'Esta clave ya se utilizó para otro carrito'},409);
+   return json({id:current.id,shippingCents:0,totalCents:amount,mode:'staging',reused:true,status:current.status,expiresAt:current.expires_at,livePaymentsEnabled:false});}
+  const now=new Date(),nowISO=now.toISOString(),until=new Date(now.getTime()+10*60*1000).toISOString();
+  const id='HC-HOLD-'+crypto.randomUUID();
+  // Una sola sentencia condicional D1: valida simultáneamente el inventario del catálogo
+  // y las reservas activas. Evita sobre-reservar al procesar solicitudes concurrentes.
+  // Reservas expiran a los 10 minutos; NO se descuentan del catálogo principal.
+  const reserveSQL=`INSERT INTO izipay_stock_reservations_stage
+    (id,idempotency_key,request_hash,items_json,status,created_at,expires_at)
+    SELECT ?,?,?,?,'RESERVED',?,?
+    WHERE NOT EXISTS (
+      SELECT 1 FROM json_each(?) requested
+      LEFT JOIN json_each((SELECT value FROM appdata WHERE key='catalog'),'$.products') product
+        ON CAST(json_extract(product.value,'$.id') AS TEXT)=CAST(json_extract(requested.value,'$.id') AS TEXT)
+      WHERE product.value IS NULL
+      OR CAST(json_extract(product.value,'$.stock') AS INTEGER) <
+        CAST(json_extract(requested.value,'$.qty') AS INTEGER) +
+        COALESCE((SELECT SUM(CAST(json_extract(held.value,'$.qty') AS INTEGER))
+          FROM izipay_stock_reservations_stage res,json_each(res.items_json) held
+          WHERE res.status='RESERVED' AND res.expires_at>?
+          AND CAST(json_extract(held.value,'$.id') AS TEXT)=CAST(json_extract(requested.value,'$.id') AS TEXT)),0)
+      OR CAST(ROUND(CAST(json_extract(product.value,'$.price') AS REAL)*100) AS INTEGER) !=
+        CAST(json_extract(requested.value,'$.unit_cents') AS INTEGER)
+    )`;
+  try{
+   const result=await env.DB.prepare(reserveSQL).bind(id,idempotencyKey,hash,itemsJson,nowISO,until,itemsJson,nowISO).run();
+   if(result.meta?.changes!==1)return json({error:'Stock no disponible o precio modificado. Actualiza el carrito e inténtalo otra vez.'},409);
+  }catch(e){
+   const saved=await env.DB.prepare('SELECT id,request_hash,status,expires_at FROM izipay_stock_reservations_stage WHERE idempotency_key=?').bind(idempotencyKey).first();
+   if(saved){if(saved.request_hash!==hash)return json({error:'Esta clave ya se utilizó con otro carrito'},409);
+    return json({id:saved.id,shippingCents:0,totalCents:amount,mode:'staging',reused:true,status:saved.status,expiresAt:saved.expires_at,livePaymentsEnabled:false});}
+   throw e;
+  }
+  return json({id,shippingCents:0,totalCents:amount,mode:'staging',reused:false,status:'RESERVED',expiresAt:until,livePaymentsEnabled:false},201);
+ }
+ if(p==='/api/izipay/staging-stock/release'&&method==='POST'){
+  if(!await auth(req,env))return json({error:'Solo administrador'},401);
+  const x=await requestJson(req),id=String(x.id||'');
+  if(!/^HC-HOLD-[0-9a-f-]{36}$/.test(id))return json({error:'Reserva inválida'},400);
+  const r=await env.DB.prepare("UPDATE izipay_stock_reservations_stage SET status='RELEASED' WHERE id=? AND status='RESERVED'").bind(id).run();
+  return json({ok:true,changed:r.meta?.changes||0});
+ }
+
  // Panel privado de preproducción: no acepta ni inicia cobros reales.
  if(p==='/api/izipay/production-readiness'&&method==='GET'){
   if(!await auth(req,env))return json({error:'Solo administrador'},401);
   const keys=['IZIPAY_PROD_USER','IZIPAY_PROD_PASSWORD','IZIPAY_PROD_PUBLIC_KEY','IZIPAY_PROD_HMAC'];
   const present=Object.fromEntries(keys.map(k=>[k,Boolean(env[k])]));
-  const tables=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('izipay_checkout_test_orders','izipay_live_orders')").all();
+  const tables=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('izipay_checkout_test_orders','izipay_live_orders','izipay_stock_reservations_stage')").all();
   const found=new Set((tables.results||[]).map(x=>x.name));
   return json({phase:'PREPRODUCCION',livePaymentsEnabled:false,keysConfigured:present,
    d1LiveOrdersTable:found.has('izipay_live_orders'),testCheckoutTable:found.has('izipay_checkout_test_orders'),
-   r2Connected:Boolean(env.MEDIA_BUCKET),
-   pending:['Definir y mostrar gastos de envío antes del pago','Reservar stock de forma atómica','Proteger contra solicitudes repetidas y pagos duplicados','Implementar y probar IPN de producción con clave de producción, separada de TEST','Conciliación de transacciones, reembolsos y pedidos rechazados','Pruebas de producción de bajo importe autorizadas por el titular'],
+   r2Connected:Boolean(env.MEDIA_BUCKET),shipping:{mode:'free_included',shippingCents:0},stagingStockReservationsTable:found.has('izipay_stock_reservations_stage'),
+   pending:['Mostrar envío gratis en carrito definitivo y documentos de compra','Integrar las reservas atómicas ensayadas con pago real y actualizaciones de stock del administrador','Implementar idempotencia en las operaciones reales con Izipay y evitar doble cobro','Implementar y probar IPN de producción con clave de producción, separada de TEST','Conciliación de transacciones, reembolsos y pedidos rechazados','Pruebas de producción de bajo importe autorizadas por el titular'],
    warning:'Todavía no se pueden cobrar tarjetas reales. Las credenciales de producción no significan que el flujo esté habilitado.'});
  }
  if(p==='/api/izipay/checkout-live'&&method==='POST'){
