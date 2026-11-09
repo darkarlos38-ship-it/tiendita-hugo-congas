@@ -464,6 +464,41 @@ export default {async fetch(req,env){
  }
  if(!await auth(req,env))return json({error:'Inicia sesión como administrador'},401);
 
+
+ // Inventario preproducción: reservas atómicas sobre D1. Solo administrador.
+ // IMPORTANTE: no llama Izipay, no crea pedidos ni modifica stock_on_hand.
+ if(p==='/api/inventory-v1/holds-test' && method==='GET'){
+  const now=new Date().toISOString();
+  const expired=await env.DB.prepare("UPDATE hc_inventory_holds_v1 SET status='EXPIRED',updated_at=? WHERE status='RESERVED' AND expires_at<=?").bind(now,now).run();
+  const stocks=await env.DB.prepare('SELECT product_id,stock_on_hand,reserved_units,stock_version FROM hc_inventory_stock_v1 ORDER BY product_id LIMIT 100').all();
+  const holds=await env.DB.prepare('SELECT id,product_id,quantity,status,expires_at,created_at FROM hc_inventory_holds_v1 ORDER BY created_at DESC LIMIT 30').all();
+  return json({mode:'admin_test',realPaymentsEnabled:false,expiredReleased:expired.meta?.changes||0,stocks:stocks.results||[],holds:holds.results||[]});
+ }
+ if(p==='/api/inventory-v1/holds-test' && method==='POST'){
+  const x=await requestJson(req),productId=String(x.productId||''),quantity=Number(x.quantity),idempotencyKey=String(x.idempotencyKey||'');
+  if(!/^\d{1,16}$/.test(productId)||!Number.isSafeInteger(quantity)||quantity<1||quantity>10||!/^[a-zA-Z0-9_-]{12,100}$/.test(idempotencyKey))return json({error:'Producto, cantidad o identificador inválido'},400);
+  const now=new Date().toISOString();
+  await env.DB.prepare("UPDATE hc_inventory_holds_v1 SET status='EXPIRED',updated_at=? WHERE status='RESERVED' AND expires_at<=?").bind(now,now).run();
+  const old=await env.DB.prepare('SELECT id,product_id,quantity,status,expires_at FROM hc_inventory_holds_v1 WHERE idempotency_key=?').bind(idempotencyKey).first();
+  if(old){if(old.product_id!==productId||old.quantity!==quantity)return json({error:'La misma clave ya se utilizó para otra compra'},409);return json({mode:'admin_test',alreadyRecorded:true,...old});}
+  const id='HC-HOLD-'+crypto.randomUUID(),until=new Date(Date.now()+10*60*1000).toISOString();
+  try{await env.DB.prepare('INSERT INTO hc_inventory_holds_v1(id,idempotency_key,product_id,quantity,status,created_at,expires_at,updated_at) VALUES(?,?,?,?,?,?,?,?)')
+    .bind(id,idempotencyKey,productId,quantity,'RESERVED',now,until,now).run();}
+  catch(e){
+   const duplicate=await env.DB.prepare('SELECT id,product_id,quantity,status,expires_at FROM hc_inventory_holds_v1 WHERE idempotency_key=?').bind(idempotencyKey).first();
+   if(duplicate){if(duplicate.product_id!==productId||duplicate.quantity!==quantity)return json({error:'Identificador reutilizado con datos diferentes'},409);return json({mode:'admin_test',alreadyRecorded:true,...duplicate});}
+   console.error('Inventory hold test rejected',String(e));return json({error:'No hay existencias libres suficientes o el inventario no está sincronizado'},409);
+  }
+  return json({mode:'admin_test',realPaymentsEnabled:false,id,productId,quantity,status:'RESERVED',expiresAt:until,alreadyRecorded:false},201);
+ }
+ if(p==='/api/inventory-v1/holds-test/release' && method==='POST'){
+  const x=await requestJson(req),id=String(x.id||'');
+  if(!/^HC-HOLD-[0-9a-f-]{36}$/.test(id))return json({error:'Reserva inválida'},400);
+  const now=new Date().toISOString();
+  const result=await env.DB.prepare("UPDATE hc_inventory_holds_v1 SET status='RELEASED',updated_at=? WHERE id=? AND status='RESERVED'").bind(now,id).run();
+  return json({mode:'admin_test',released:result.meta?.changes===1,realPaymentsEnabled:false});
+ }
+
  if(p==='/api/provider'&&method==='PUT'){
    const x=await requestJson(req),legalName=clean(x.legalName,200).trim(),ruc=clean(x.ruc,11).trim(),address=clean(x.address,300).trim();
    if(!legalName||!/^\d{11}$/.test(ruc)||!address)return json({error:'Completa razón social, RUC de 11 dígitos y domicilio legal'},400);
