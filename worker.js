@@ -586,6 +586,52 @@ export default {async fetch(req,env){
  }
 
  // Panel privado de preproducción: no acepta ni inicia cobros reales.
+ // PREPRODUCTION AUDIT — READ ONLY. Does not modify orders, inventory or enable charges.
+ if(p==='/api/izipay/production-audit'&&method==='GET'){
+  if(!await auth(req,env))return json({error:'Solo administrador'},401);
+  const gate=await env.DB.prepare('SELECT enabled FROM hc_live_payment_gate WHERE id=1').first();
+  const schema=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('hc_live_order_holds','hc_live_fulfillments','hc_inventory_holds_v1','hc_inventory_stock_v1','izipay_live_orders','izipay_live_webhook_events')").all();
+  const tables=new Set((schema.results||[]).map(x=>x.name));
+  const required=['hc_live_order_holds','hc_live_fulfillments','hc_inventory_holds_v1','hc_inventory_stock_v1','izipay_live_orders','izipay_live_webhook_events'];
+  const missing=required.filter(x=>!tables.has(x));
+  if(missing.length)return json({phase:'PREPRODUCCION',gateEnabled:Number(gate?.enabled||0)===1,missingTables:missing,orders:[],warnings:['Faltan tablas de producción; no habilitar pagos.']});
+  const [orders,events,maps,stocks,fulfillments]=await Promise.all([
+   env.DB.prepare('SELECT id,amount_cents,shipping_cents,currency,status,created_at,paid_at FROM izipay_live_orders ORDER BY created_at DESC LIMIT 30').all(),
+   env.DB.prepare('SELECT order_id,verified,processing_status,received_at FROM izipay_live_webhook_events ORDER BY received_at DESC LIMIT 100').all(),
+   env.DB.prepare(`SELECT m.order_id,m.product_id,m.quantity,m.hold_id,h.status AS hold_status,h.expires_at
+     FROM hc_live_order_holds m LEFT JOIN hc_inventory_holds_v1 h ON h.id=m.hold_id
+     WHERE m.order_id IN (SELECT id FROM izipay_live_orders ORDER BY created_at DESC LIMIT 30)`).all(),
+   env.DB.prepare('SELECT product_id,stock_on_hand,reserved_units FROM hc_inventory_stock_v1 LIMIT 500').all(),
+   env.DB.prepare(`SELECT order_id,product_id,quantity FROM hc_live_fulfillments
+      WHERE order_id IN (SELECT id FROM izipay_live_orders ORDER BY created_at DESC LIMIT 30)`).all()
+  ]);
+  const eventsByOrder=new Map();
+  for(const e of events.results||[]){if(!eventsByOrder.has(e.order_id))eventsByOrder.set(e.order_id,[]);eventsByOrder.get(e.order_id).push(e)}
+  const holdsByOrder=new Map();
+  for(const h of maps.results||[]){if(!holdsByOrder.has(h.order_id))holdsByOrder.set(h.order_id,[]);holdsByOrder.get(h.order_id).push(h)}
+  const stocksById=new Map((stocks.results||[]).map(x=>[String(x.product_id),x]));
+  const fulfillsByOrder=new Map();
+  for(const f of fulfillments.results||[]){if(!fulfillsByOrder.has(f.order_id))fulfillsByOrder.set(f.order_id,[]);fulfillsByOrder.get(f.order_id).push(f)}
+  const records=(orders.results||[]).map(o=>{
+   const warnings=[],attached=holdsByOrder.get(o.id)||[],ev=eventsByOrder.get(o.id)||[],deb=fulfillsByOrder.get(o.id)||[];
+   if(o.shipping_cents!==0||o.currency!=='PEN')warnings.push('Moneda o envío no coincide con política');
+   if(o.status==='PAID'&&!ev.some(x=>x.verified===1&&x.processing_status==='GATE_CLOSED_PAID'))warnings.push('Pedido PAID sin evento IPN pagado verificado');
+   if(o.status==='PAID'&&attached.length===0)warnings.push('Pedido pagado sin reservas asociadas');
+   if(deb.length&&o.status!=='PAID')warnings.push('Descuento de inventario sin pedido PAID');
+   for(const h of attached){
+    const stock=stocksById.get(String(h.product_id));
+    if(!h.hold_status)warnings.push('Reserva no encontrada');
+    if(!stock)warnings.push('Producto sin inventario');
+    else if(Number(stock.reserved_units)>Number(stock.stock_on_hand))warnings.push('Inventario inconsistente');
+   }
+   return {id:o.id,status:o.status,amountCents:o.amount_cents,shippingCents:o.shipping_cents,
+    reservations:attached.length,verifiedPaidNotifications:ev.filter(x=>x.verified===1&&x.processing_status==='GATE_CLOSED_PAID').length,
+    settlements:deb.length,warnings};
+  });
+  return json({phase:'PREPRODUCCION',gateEnabled:Number(gate?.enabled||0)===1,realPaymentsAllowed:false,
+    missingTables:[],orders:records,warning:'Auditoría de solo lectura. No es una autorización para cobrar. La IPN actual registra eventos, pero no reconcilia pedidos ni descuenta stock.'});
+ }
+
  if(p==='/api/izipay/production-readiness'&&method==='GET'){
   if(!await auth(req,env))return json({error:'Solo administrador'},401);
   const keys=['IZIPAY_PROD_USER','IZIPAY_PROD_PASSWORD','IZIPAY_PROD_PUBLIC_KEY','IZIPAY_PROD_HMAC'];
