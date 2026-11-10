@@ -44,7 +44,13 @@ async function reconcileLiveOrder(env,{orderId,state,amount,currency,answer,rece
       WHERE gateway_transaction_id=? AND id<>? LIMIT 1`).bind(txId,orderId).first();
     if(usedTx)throw new Error('TRANSACTION_ALREADY_LINKED_TO_ANOTHER_ORDER');
   }
-  if(order.status==='PAID')return 'OK - already processed';
+  if(order.status==='PAID'){
+    let paidItems;try{paidItems=JSON.parse(order.items_json)}catch{throw new Error('PAID_ITEMS_INVALID')}
+    const record=await env.DB.prepare('SELECT COUNT(*) AS n FROM hc_live_fulfillments WHERE order_id=?').bind(orderId).first();
+    if(!Array.isArray(paidItems)||paidItems.length<1||Number(record?.n)!==paidItems.length)
+      throw new Error('PAID_ORDER_MISSING_FULFILLMENTS');
+    return 'OK - already processed';
+  }
   // Si primero llegó rechazo/cancelación y DESPUÉS llega un PAID firmado,
   // NO perder el cobro ni descontar inventario: enviar a revisión humana.
   if(state==='PAID'&&['REJECTED','CANCELLED','REVIEW_REQUIRED'].includes(order.status)){
@@ -96,8 +102,9 @@ async function reconcileLiveOrder(env,{orderId,state,amount,currency,answer,rece
       commands.push(env.DB.prepare(`INSERT INTO hc_live_fulfillments
         (order_id,product_id,hold_id,quantity,created_at)
         SELECT ?,?,?,?,? WHERE EXISTS
-          (SELECT 1 FROM izipay_live_orders WHERE id=? AND status='PAID' AND paid_at=?)`)
-        .bind(orderId,String(h.product_id),h.hold_id,Number(h.quantity),receivedAt,orderId,receivedAt));
+          (SELECT 1 FROM izipay_live_orders WHERE id=? AND status='PAID' AND paid_at=?)
+          AND NOT EXISTS (SELECT 1 FROM hc_live_fulfillments WHERE order_id=? AND hold_id=?)`)
+        .bind(orderId,String(h.product_id),h.hold_id,Number(h.quantity),receivedAt,orderId,receivedAt,orderId,h.hold_id));
     }
     await env.DB.batch(commands);
     return 'OK - payment reconciled';
@@ -805,7 +812,9 @@ export default {async fetch(req,env){
     const unit=Math.round(Number(prod.price)*100);
     if(!Number.isSafeInteger(unit)||unit<1)return json({error:'Precio inválido'},409);
     const stock=await env.DB.prepare('SELECT stock_on_hand,reserved_units FROM hc_inventory_stock_v1 WHERE product_id=?').bind(id).first();
-    if(!stock||Number(stock.stock_on_hand)-Number(stock.reserved_units)<qty)
+    if(!stock||Number(stock.stock_on_hand)!==Number(prod.stock))
+      return json({error:'El inventario del producto no está sincronizado. Consulta con la tienda antes de pagar.'},409);
+    if(Number(stock.stock_on_hand)-Number(stock.reserved_units)<qty)
       return json({error:'Stock insuficiente para '+clean(prod.title,80)},409);
     const subtotal=unit*qty;amount+=subtotal;
     if(!Number.isSafeInteger(amount)||amount>20000000)return json({error:'Importe fuera de rango'},400);
@@ -978,15 +987,82 @@ export default {async fetch(req,env){
    await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await digest(cookie(req))).run();
    return json({ok:true},200,{'Set-Cookie':'hc_admin=; HttpOnly; SameSite=Strict; Secure; Path=/; Max-Age=0'});
  }
+ // Administrador: catálogo JSON y stock D1 deben cambiar conjuntamente.
+ // Nunca reducir inventario por debajo de reservas existentes, ni borrar un
+ // producto con unidades comprometidas. Los pedidos conservan su precio histórico.
  if(p==='/api/products'&&method==='POST'){
-   const input=await requestJson(req);if(input.gallery!==undefined&&!validGallery(input.gallery))return json({error:'Galería inválida (máximo 8 fotos adicionales)'},400);const db=await data(env),it=item(input);if(!valid(it))return json({error:'Datos del instrumento inválidos'},400);
-   db.products.unshift(it);await save(env,db);return json({product:it},201)
+   const input=await requestJson(req);
+   if(input.gallery!==undefined&&!validGallery(input.gallery))return json({error:'Galería inválida (máximo 8 fotos adicionales)'},400);
+   const raw=await env.DB.prepare("SELECT value FROM appdata WHERE key='catalog'").first();
+   const db=raw?JSON.parse(raw.value):await data(env),before=raw?.value||JSON.stringify(db),it=item(input);
+   if(!valid(it)||!Number.isSafeInteger(it.stock)||it.stock<0)return json({error:'Datos o stock inválidos'},400);
+   if(db.products.some(p=>String(p.id)===String(it.id)))return json({error:'Identificador de producto duplicado; intenta de nuevo'},409);
+   db.products.unshift(it);
+   const after=JSON.stringify(db),now=new Date().toISOString();
+   try{
+     const results=await env.DB.batch([
+       env.DB.prepare(`INSERT INTO hc_inventory_stock_v1
+         (product_id,stock_on_hand,reserved_units,stock_version,imported_at)
+         SELECT ?,?,0,1,? WHERE EXISTS (SELECT 1 FROM appdata WHERE key='catalog' AND value=?)`)
+         .bind(String(it.id),it.stock,now,before),
+       env.DB.prepare(`UPDATE appdata SET value=? WHERE key='catalog' AND value=? AND EXISTS
+         (SELECT 1 FROM hc_inventory_stock_v1 WHERE product_id=? AND stock_on_hand=? AND reserved_units=0)`)
+         .bind(after,before,String(it.id),it.stock)
+     ]);
+     if(Number(results[0]?.meta?.changes)!==1||Number(results[1]?.meta?.changes)!==1)
+       return json({error:'Catálogo modificado o inventario no sincronizado. Recarga el administrador y verifica el producto.'},409);
+   }catch(e){console.error('D1 product creation aborted',String(e?.message||e));return json({error:'No se pudo crear el producto con inventario D1. No repitas sin verificar.'},409)}
+   return json({product:it},201);
  }
  const match=p.match(/^\/api\/products\/(\d+)$/);
  if(match&&['PUT','DELETE'].includes(method)){
-   const db=await data(env),index=db.products.findIndex(x=>String(x.id)===match[1]);if(index<0)return json({error:'No encontrado'},404);
-   if(method==='DELETE')db.products.splice(index,1);else{const input=await requestJson(req);if(input.gallery!==undefined&&!validGallery(input.gallery))return json({error:'Galería inválida (máximo 8 fotos adicionales)'},400);const it=item(input,db.products[index]);if(!valid(it))return json({error:'Datos inválidos'},400);db.products[index]=it}
-   await save(env,db);return json({ok:true});
+   const raw=await env.DB.prepare("SELECT value FROM appdata WHERE key='catalog'").first();
+   const db=raw?JSON.parse(raw.value):await data(env),before=raw?.value||JSON.stringify(db),index=db.products.findIndex(x=>String(x.id)===match[1]);
+   if(index<0)return json({error:'Producto no encontrado'},404);
+   const id=match[1];
+   if(method==='DELETE'){
+     // Se conserva el asiento D1 histórico; borrar del catálogo no borra ventas.
+     db.products.splice(index,1);
+     const r=await env.DB.prepare(`UPDATE appdata SET value=? WHERE key='catalog' AND value=?
+       AND NOT EXISTS (SELECT 1 FROM hc_inventory_stock_v1 WHERE product_id=? AND reserved_units>0)`)
+       .bind(JSON.stringify(db),before,id).run();
+     if(Number(r.meta?.changes)!==1)return json({error:'Producto con reservas activas o catálogo modificado. No se eliminó.'},409);
+     return json({ok:true});
+   }
+   const input=await requestJson(req);
+   if(input.gallery!==undefined&&!validGallery(input.gallery))return json({error:'Galería inválida (máximo 8 fotos adicionales)'},400);
+   const previous=db.products[index],it=item(input,previous);
+   if(!valid(it)||!Number.isSafeInteger(it.stock)||it.stock<0)return json({error:'Datos o stock inválidos'},400);
+   // No permitir editar sobre un inventario ya desfasado con el catálogo.
+   const row=await env.DB.prepare(`SELECT stock_on_hand,reserved_units,stock_version
+     FROM hc_inventory_stock_v1 WHERE product_id=?`).bind(id).first();
+   if(row&&(Number(row.stock_on_hand)!==Number(previous.stock)||!Number.isSafeInteger(Number(row.stock_version))))
+     return json({error:'Inventario D1 distinto al catálogo: concilia el stock antes de editar.'},409);
+   if(row&&Number(row.reserved_units)>it.stock)
+     return json({error:'El stock solicitado es menor que las unidades reservadas.'},409);
+   const oldVersion=row?Number(row.stock_version):1;
+   db.products[index]=it;
+   const after=JSON.stringify(db),now=new Date().toISOString();
+   try{
+     const results=await env.DB.batch([
+       // Recupera únicamente productos heredados que todavía no tengan asiento D1.
+       env.DB.prepare(`INSERT OR IGNORE INTO hc_inventory_stock_v1
+         (product_id,stock_on_hand,reserved_units,stock_version,imported_at)
+         SELECT ?,?,0,1,? WHERE EXISTS (SELECT 1 FROM appdata WHERE key='catalog' AND value=?)`)
+         .bind(id,Number(previous.stock),now,before),
+       env.DB.prepare(`UPDATE hc_inventory_stock_v1 SET stock_on_hand=?,stock_version=stock_version+1,imported_at=?
+         WHERE product_id=? AND stock_on_hand=? AND stock_version=? AND reserved_units<=?
+           AND EXISTS (SELECT 1 FROM appdata WHERE key='catalog' AND value=?)`)
+         .bind(it.stock,now,id,Number(previous.stock),oldVersion,it.stock,before),
+       env.DB.prepare(`UPDATE appdata SET value=? WHERE key='catalog' AND value=? AND EXISTS
+         (SELECT 1 FROM hc_inventory_stock_v1 WHERE product_id=? AND stock_on_hand=?
+           AND stock_version=? AND reserved_units<=stock_on_hand)`)
+         .bind(after,before,id,it.stock,oldVersion+1)
+     ]);
+     if(Number(results[1]?.meta?.changes)!==1||Number(results[2]?.meta?.changes)!==1)
+       return json({error:'Stock reservado o catálogo actualizado por otra sesión. Recarga y vuelve a verificar.'},409);
+   }catch(e){console.error('D1 product stock synchronization aborted',String(e?.message||e));return json({error:'No se pudo sincronizar producto e inventario. No modifiques el stock hasta revisar.'},409)}
+   return json({ok:true});
  }
  if(p==='/api/settings'&&method==='PUT'){
    const patch=await requestJson(req),db=await data(env);for(const k of ['heroTitle','heroText'])if(typeof patch[k]==='string')db.settings[k]=clean(patch[k],400);
