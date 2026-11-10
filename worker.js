@@ -30,8 +30,67 @@ export default {async fetch(req,env){
  }
  if(!p.startsWith('/api/'))return env.ASSETS.fetch(req);
  if(!env.DB)return json({error:'Falta conectar la base de datos D1'},503);
- if(!['GET','HEAD'].includes(method)&&p!=='/api/izipay/ipn'&&!sameOrigin(req))return json({error:'Origen no autorizado'},403);
+ if(!['GET','HEAD'].includes(method)&&p!=='/api/izipay/ipn'&&p!=='/api/izipay/production/ipn'&&!sameOrigin(req))return json({error:'Origen no autorizado'},403);
 
+
+ // IZIPAY PRODUCTION IPN RECEIVER (SAFE, DISABLED FOR LIVE PAYMENTS).
+ // Dedicated server-to-server endpoint. Never uses browser Origin, cookies or public keys.
+ // It verifies signed form data using the PRODUCTION REST password, per Izipay's PaymentForm IPN.
+ // IMPORTANT: It ONLY records valid events for preexisting production orders.
+ // It NEVER changes an order to PAID, debits stock, creates charges, or opens the live gate.
+ if(p==='/api/izipay/production/ipn'){
+  if(method==='GET'||method==='HEAD')return new Response(method==='HEAD'?null:'IPN receiver online; live payments disabled',{status:200,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store',...security}});
+  if(method!=='POST')return new Response('Method Not Allowed',{status:405,headers:{Allow:'POST',...security}});
+  const ct=(req.headers.get('content-type')||'').toLowerCase();
+  if(!ct.startsWith('application/x-www-form-urlencoded')&&!ct.startsWith('multipart/form-data;'))
+   return new Response('Unsupported Media Type',{status:415,headers:security});
+  if(!env.IZIPAY_PROD_PASSWORD)return new Response('Service Unavailable',{status:503,headers:security});
+  const declared=Number(req.headers.get('content-length')||0);
+  if(declared>65536)return new Response('Payload Too Large',{status:413,headers:security});
+  let fields;
+  try{
+   // Parse raw POST body once; do not log payment form contents.
+   const raw=await req.text();
+   if(raw.length>65536)return new Response('Payload Too Large',{status:413,headers:security});
+   if(ct.startsWith('multipart/form-data;')){
+    // This integration uses x-www-form-urlencoded IPN. Reject other formats to avoid ambiguity.
+    return new Response('Unsupported Media Type',{status:415,headers:security});
+   }
+   const params=new URLSearchParams(raw);
+   if([...params.keys()].length>12||params.getAll('kr-answer').length!==1||params.getAll('kr-hash').length!==1)
+    return new Response('Bad Request',{status:400,headers:security});
+   fields={answer:params.get('kr-answer'),hash:params.get('kr-hash')};
+  }catch{return new Response('Bad Request',{status:400,headers:security})}
+  if(!fields.answer||typeof fields.hash!=='string'||fields.answer.length>50000||!/^[a-f0-9]{64}$/i.test(fields.hash))
+   return new Response('Bad Request',{status:400,headers:security});
+  const macBytes=new Uint8Array(fields.hash.match(/../g).map(h=>parseInt(h,16)));
+  const key=await crypto.subtle.importKey('raw',enc.encode(env.IZIPAY_PROD_PASSWORD),{name:'HMAC',hash:'SHA-256'},false,['verify']);
+  if(!await crypto.subtle.verify('HMAC',key,macBytes,enc.encode(fields.answer)))
+   return new Response('Forbidden',{status:403,headers:security});
+  let a;
+  try{a=JSON.parse(fields.answer)}catch{return new Response('Bad Request',{status:400,headers:security})}
+  const orderId=String(a?.orderDetails?.orderId||''),state=String(a?.orderStatus||'');
+  const amount=a?.orderDetails?.orderTotalAmount,currency=String(a?.orderDetails?.orderCurrency||'');
+  if(!/^HC-LIVE-[A-Za-z0-9-]{12,80}$/.test(orderId)||!['PAID','UNPAID','ABANDONED','CANCELLED'].includes(state)||
+     !Number.isSafeInteger(amount)||amount<=0||currency!=='PEN')
+   return new Response('Bad Request',{status:400,headers:security});
+  // Match independently authoritative D1 order fields. Do not trust amounts or order IDs from request alone.
+  const order=await env.DB.prepare('SELECT id,amount_cents,currency,status,shipping_cents FROM izipay_live_orders WHERE id=?').bind(orderId).first();
+  if(!order)return new Response('Not Found',{status:404,headers:security});
+  if(Number(order.amount_cents)!==amount||order.currency!=='PEN'||order.shipping_cents!==0)
+   return new Response('Conflict',{status:409,headers:security});
+  const digestHex=await digest(fields.answer);
+  // Persist only digest + metadata (no full payment response, card data or credentials).
+  // The UNIQUE(payload_digest) column makes delivery retries idempotent.
+  const now=new Date().toISOString();
+  try{
+   await env.DB.prepare(`INSERT OR IGNORE INTO izipay_live_webhook_events
+     (id,order_id,payload_digest,verified,received_at,processing_status)
+     VALUES(?,?,?,?,?,?)`).bind('HC-IPN-'+crypto.randomUUID(),orderId,digestHex,1,now,'GATE_CLOSED_'+state).run();
+  }catch(e){console.error('Production IPN audit write failed',String(e));return new Response('Service Unavailable',{status:503,headers:security})}
+  // Fail closed regardless of DB gate value: this code is NOT a production payment processor yet.
+  return new Response('OK - recorded for review, fulfillment disabled',{status:200,headers:{'Content-Type':'text/plain; charset=utf-8',...security}});
+ }
 
  // IZIPAY ONLINE: TEST ONLY. No real-money charges in this integration.
  if(p==='/api/izipay/config'&&method==='GET')return json({mode:'test',ready:!!(env.IZIPAY_TEST_USER&&env.IZIPAY_TEST_PASSWORD&&env.IZIPAY_TEST_PUBLIC_KEY&&env.IZIPAY_TEST_HMAC),production:false});
