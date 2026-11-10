@@ -4489,6 +4489,6 @@ body.hc-home-mode .ds-brand:hover{color:#fed700!important}
  q('hc-claims-print').addEventListener('click',()=>{if(!lastReceipt)return;const data=lastReceipt;let lines=['LIBRO DE RECLAMACIONES - CONSTANCIA','Registro: '+data.number,'Fecha: '+data.date,'Proveedor: '+(data.provider?.legalName||'')+' | RUC: '+(data.provider?.ruc||''),'Domicilio del proveedor: '+(data.provider?.address||''),'','Cliente: '+data.nombres+' '+data.apellidos,'Documento: '+data.documento_tipo+' '+data.documento,'Correo: '+data.correo,'Teléfono: '+data.telefono,'Domicilio: '+data.domicilio+', '+data.distrito+', '+data.departamento,'Representante: '+(data.representante||'No aplica'),'Tipo: '+data.tipo,'Bien: '+data.bien_tipo+' · S/ '+data.monto,'Descripción: '+data.bien_descripcion,'','DETALLE:',data.detalle,'','PEDIDO:',data.pedido,'','Plazo de respuesta: 15 días hábiles.'];const w=window.open('','_blank','width=860,height=750');if(!w)return;w.document.write('<!doctype html><meta charset="utf-8"><title>Constancia '+data.number+'</title><style>body{font:15px/1.6 Arial;padding:30px;white-space:pre-wrap;max-width:760px;margin:auto}</style><div id="txt"></div>');w.document.getElementById('txt').textContent=lines.join('\n');w.document.close();w.focus();setTimeout(()=>w.print(),300)});
 })();
 </script>
-
+<script src="/panel-gestion-acceso.js" defer></script>
 </body>
 </html>
