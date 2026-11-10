@@ -34,13 +34,27 @@ async function reconcileLiveOrder(env,{orderId,state,amount,currency,answer,rece
     throw new Error('ORDER_MISMATCH');
   const txs=Array.isArray(answer?.transactions)?answer.transactions:[];
   const txId=txs.find(t=>typeof t?.uuid==='string'&&/^[A-Za-z0-9-]{12,100}$/.test(t.uuid))?.uuid;
-  if(!txId)throw new Error('TRANSACTION_ID_MISSING');
-  if(order.gateway_transaction_id&&order.gateway_transaction_id!==txId)throw new Error('TRANSACTION_MISMATCH');
-  const usedTx=await env.DB.prepare(`SELECT id FROM izipay_live_orders
-    WHERE gateway_transaction_id=? AND id<>? LIMIT 1`).bind(txId,orderId).first();
-  if(usedTx)throw new Error('TRANSACTION_ALREADY_LINKED_TO_ANOTHER_ORDER');
+  // En algunas notificaciones negativas no hay UUID de transacción aprobada.
+  // Para reconocer un cobro PAID sí exigimos UUID y exclusividad por pedido.
+  if(state==='PAID'&&!txId)throw new Error('TRANSACTION_ID_MISSING');
+  if(txId&&order.gateway_transaction_id&&order.gateway_transaction_id!==txId)
+    throw new Error('TRANSACTION_MISMATCH');
+  if(txId){
+    const usedTx=await env.DB.prepare(`SELECT id FROM izipay_live_orders
+      WHERE gateway_transaction_id=? AND id<>? LIMIT 1`).bind(txId,orderId).first();
+    if(usedTx)throw new Error('TRANSACTION_ALREADY_LINKED_TO_ANOTHER_ORDER');
+  }
   if(order.status==='PAID')return 'OK - already processed';
-  if(['CANCELLED','REFUNDED','REFUND_PENDING'].includes(order.status))throw new Error('ORDER_TERMINAL');
+  // Si primero llegó rechazo/cancelación y DESPUÉS llega un PAID firmado,
+  // NO perder el cobro ni descontar inventario: enviar a revisión humana.
+  if(state==='PAID'&&['REJECTED','CANCELLED','REVIEW_REQUIRED'].includes(order.status)){
+    await env.DB.prepare(`UPDATE izipay_live_orders
+      SET status='REVIEW_REQUIRED',updated_at=?,gateway_transaction_id=COALESCE(gateway_transaction_id,?)
+      WHERE id=? AND status IN ('REJECTED','CANCELLED','REVIEW_REQUIRED') AND paid_at IS NULL`)
+      .bind(receivedAt,txId,orderId).run();
+    return 'OK - signed late payment requires manual review';
+  }
+  if(['REFUNDED','REFUND_PENDING'].includes(order.status))throw new Error('ORDER_REFUND_REQUIRES_REVIEW');
   const holds=await env.DB.prepare(`SELECT m.product_id,m.quantity,m.hold_id,h.status AS hold_status,
       h.expires_at,h.product_id AS hold_product_id,h.quantity AS hold_quantity
       FROM hc_live_order_holds m LEFT JOIN hc_inventory_holds_v1 h ON h.id=m.hold_id
