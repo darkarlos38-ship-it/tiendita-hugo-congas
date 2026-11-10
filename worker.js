@@ -17,6 +17,86 @@ function item(p,old){const image=clean(p.image||'');return {id:old?.id??crypto.g
 function valid(p){return p.title&&p.category&&p.brand&&Number.isFinite(p.price)&&p.price>=0&&Number.isFinite(p.oldPrice)&&p.oldPrice>=0&&Number.isFinite(p.stock)&&p.stock>=0}
 async function requestJson(req){const len=Number(req.headers.get('content-length')||0);if(len>5_000_000)throw Error('Datos demasiado grandes');const t=await req.text();if(t.length>5_000_000)throw Error('Datos demasiado grandes');return JSON.parse(t||'{}')}
 function sameOrigin(req){const o=req.headers.get('origin');return !o||o===new URL(req.url).origin}
+
+// IMPRESCINDIBLE: mantener false. La compuerta D1 por sí sola no habilita pagos.
+// Esta rutina está preparada, NO certificada para dinero real.
+const LIVE_RECONCILIATION_RELEASED=false;
+
+/** Reconciliación transaccional futura. Solo callable por la IPN firmada. */
+async function reconcileLiveOrder(env,{orderId,state,amount,currency,answer,receivedAt}){
+  const gate=await env.DB.prepare('SELECT enabled FROM hc_live_payment_gate WHERE id=1').first();
+  if(!LIVE_RECONCILIATION_RELEASED||Number(gate?.enabled)!==1) return 'OK - disabled, event audited';
+  const order=await env.DB.prepare(`SELECT id,items_json,status,amount_cents,shipping_cents,currency,paid_at,
+      gateway_transaction_id FROM izipay_live_orders WHERE id=?`).bind(orderId).first();
+  if(!order||Number(order.amount_cents)!==amount||order.currency!==currency||Number(order.shipping_cents)!==0)
+    throw new Error('ORDER_MISMATCH');
+  const txs=Array.isArray(answer?.transactions)?answer.transactions:[];
+  const txId=txs.find(t=>typeof t?.uuid==='string'&&/^[A-Za-z0-9-]{12,100}$/.test(t.uuid))?.uuid;
+  if(!txId)throw new Error('TRANSACTION_ID_MISSING');
+  if(order.gateway_transaction_id&&order.gateway_transaction_id!==txId)throw new Error('TRANSACTION_MISMATCH');
+  if(order.status==='PAID')return 'OK - already processed';
+  if(['CANCELLED','REFUNDED','REFUND_PENDING'].includes(order.status))throw new Error('ORDER_TERMINAL');
+  const holds=await env.DB.prepare(`SELECT m.product_id,m.quantity,m.hold_id,h.status AS hold_status,
+      h.expires_at,h.product_id AS hold_product_id,h.quantity AS hold_quantity
+      FROM hc_live_order_holds m LEFT JOIN hc_inventory_holds_v1 h ON h.id=m.hold_id
+      WHERE m.order_id=?`).bind(orderId).all();
+  let items;
+  try{items=JSON.parse(order.items_json)}catch{throw new Error('ITEMS_INVALID')}
+  if(!Array.isArray(items)||!items.length||items.length!==holds.results.length)throw new Error('HOLD_ITEM_COUNT_MISMATCH');
+  const ids=new Set();let checkedTotal=0;
+  for(const it of items){
+    const id=String(it?.id),qty=Number(it?.qty),unit=Number(it?.unit_cents);
+    if(!/^\d{1,16}$/.test(id)||ids.has(id)||!Number.isSafeInteger(qty)||qty<1||
+       !Number.isSafeInteger(unit)||unit<1)throw new Error('ITEM_INVALID');
+    ids.add(id);checkedTotal+=qty*unit;
+    const h=holds.results.find(v=>String(v.product_id)===id);
+    if(!h||Number(h.quantity)!==qty||h.hold_product_id!==id||Number(h.hold_quantity)!==qty)
+      throw new Error('HOLD_MISMATCH');
+  }
+  if(!Number.isSafeInteger(checkedTotal)||checkedTotal!==amount)throw new Error('ITEM_AMOUNT_MISMATCH');
+  const allActive=holds.results.every(h=>h.hold_status==='RESERVED'&&h.expires_at>receivedAt);
+  if(state==='PAID'){
+    if(!allActive){
+      // Cobro auténtico tardío: revisión manual, nunca despachar ni descontar.
+      await env.DB.prepare(`UPDATE izipay_live_orders SET status='REVIEW_REQUIRED',
+        gateway_transaction_id=COALESCE(gateway_transaction_id,?) WHERE id=? AND status IN ('DRAFT','AWAITING_PAYMENT','AUTHORIZED')`)
+        .bind(txId,orderId).run();
+      return 'OK - payment under review';
+    }
+    if(!['AWAITING_PAYMENT','AUTHORIZED'].includes(order.status))throw new Error('STATE_NOT_PAYABLE');
+    // Un solo batch transaccional: o se registra el pedido y todos los asientos, o ninguno.
+    // Disparadores D1 existentes validan pago firmado, existencia, reserva y sincronizan catálogo.
+    const commands=[
+      env.DB.prepare(`UPDATE izipay_live_orders SET status='PAID',paid_at=?,gateway_transaction_id=?
+        WHERE id=? AND status IN ('AWAITING_PAYMENT','AUTHORIZED') AND paid_at IS NULL`)
+        .bind(receivedAt,txId,orderId)
+    ];
+    for(const h of holds.results){
+      commands.push(env.DB.prepare(`INSERT INTO hc_live_fulfillments
+        (order_id,product_id,hold_id,quantity,created_at)
+        SELECT ?,?,?,?,? WHERE EXISTS
+          (SELECT 1 FROM izipay_live_orders WHERE id=? AND status='PAID' AND paid_at=?)`)
+        .bind(orderId,String(h.product_id),h.hold_id,Number(h.quantity),receivedAt,orderId,receivedAt));
+    }
+    await env.DB.batch(commands);
+    return 'OK - payment reconciled';
+  }
+  if(['UNPAID','ABANDONED','CANCELLED'].includes(state)){
+    // Solo soltar reservas de pedidos nunca pagados.
+    const commands=[env.DB.prepare(`UPDATE izipay_live_orders SET status='REJECTED'
+      WHERE id=? AND status IN ('DRAFT','AWAITING_PAYMENT','AUTHORIZED') AND paid_at IS NULL`).bind(orderId)];
+    for(const h of holds.results){
+      commands.push(env.DB.prepare(`UPDATE hc_inventory_holds_v1 SET status='RELEASED',updated_at=?
+        WHERE id=? AND status='RESERVED' AND EXISTS
+        (SELECT 1 FROM izipay_live_orders WHERE id=? AND status='REJECTED' AND paid_at IS NULL)`)
+        .bind(receivedAt,h.hold_id,orderId));
+    }
+    await env.DB.batch(commands);
+    return 'OK - unsuccessful payment reconciled';
+  }
+  throw new Error('UNKNOWN_STATE');
+}
+
 export default {async fetch(req,env){
  const url=new URL(req.url),p=url.pathname,method=req.method;
  try{
@@ -88,8 +168,20 @@ export default {async fetch(req,env){
      (id,order_id,payload_digest,verified,received_at,processing_status)
      VALUES(?,?,?,?,?,?)`).bind('HC-IPN-'+crypto.randomUUID(),orderId,digestHex,1,now,'GATE_CLOSED_'+state).run();
   }catch(e){console.error('Production IPN audit write failed',String(e));return new Response('Service Unavailable',{status:503,headers:security})}
-  // Fail closed regardless of DB gate value: this code is NOT a production payment processor yet.
-  return new Response('OK - recorded for review, fulfillment disabled',{status:200,headers:{'Content-Type':'text/plain; charset=utf-8',...security}});
+  // Segunda compuerta de código: NO modificar hasta que una revisión independiente
+  // apruebe la conciliación, reservas, reembolsos y pruebas de producción.
+  if(!LIVE_RECONCILIATION_RELEASED){
+    return new Response('OK - recorded for review, fulfillment disabled',{status:200,headers:{'Content-Type':'text/plain; charset=utf-8',...security}});
+  }
+  // La conciliación es server-to-server; nunca se expone al comprador.
+  try{
+    const outcome=await reconcileLiveOrder(env,{orderId,state,amount,currency,answer:a,receivedAt:now});
+    return new Response(outcome,{status:200,headers:{'Content-Type':'text/plain; charset=utf-8',...security}});
+  }catch(e){
+    console.error('Live IPN reconciliation requires manual review',String(e?.message||e));
+    // No enviar OK en un error recuperable: permitir reintento de Izipay.
+    return new Response('Temporary processing failure',{status:503,headers:security});
+  }
  }
 
  // IZIPAY ONLINE: TEST ONLY. No real-money charges in this integration.
