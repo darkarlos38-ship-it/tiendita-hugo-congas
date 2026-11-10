@@ -192,7 +192,13 @@ export default {async fetch(req,env){
  }
 
  // IZIPAY ONLINE: TEST ONLY. No real-money charges in this integration.
- if(p==='/api/izipay/config'&&method==='GET')return json({mode:'test',ready:!!(env.IZIPAY_TEST_USER&&env.IZIPAY_TEST_PASSWORD&&env.IZIPAY_TEST_PUBLIC_KEY&&env.IZIPAY_TEST_HMAC),production:false});
+ if(p==='/api/izipay/config'&&method==='GET'){
+  // Solo anuncia producción cuando AMBOS bloqueos y la compuerta D1 estén habilitados.
+  const released=LIVE_CHECKOUT_RELEASED&&LIVE_RECONCILIATION_RELEASED;
+  const gate=released?await env.DB.prepare('SELECT enabled FROM hc_live_payment_gate WHERE id=1').first():null;
+  const production=Boolean(released&&Number(gate?.enabled)===1&&env.IZIPAY_PROD_USER&&env.IZIPAY_PROD_PASSWORD&&env.IZIPAY_PROD_PUBLIC_KEY);
+  return json({mode:production?'production':'test',ready:!!(env.IZIPAY_TEST_USER&&env.IZIPAY_TEST_PASSWORD&&env.IZIPAY_TEST_PUBLIC_KEY&&env.IZIPAY_TEST_HMAC),production,shippingCents:0});
+ }
  if(p==='/api/izipay/create'&&method==='POST'){
   if(!env.IZIPAY_TEST_USER||!env.IZIPAY_TEST_PASSWORD||!env.IZIPAY_TEST_PUBLIC_KEY||!env.IZIPAY_TEST_HMAC)
     return json({error:'Falta configurar credenciales de prueba Izipay en Cloudflare'},503);
@@ -764,6 +770,16 @@ export default {async fetch(req,env){
   if(name.length<3||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||
      !/^[+\d\s()-]{7,25}$/.test(phone)||address.length<5||district.length<2)
     return json({error:'Completa los datos de entrega'},400);
+  // Reservas reales vencidas no pueden bloquear nuevas compras indefinidamente.
+  // Si llega luego una IPN pagada, el pedido pasa a revisión; no se despacha automáticamente.
+  const cleanupNow=new Date().toISOString();
+  await env.DB.prepare(`UPDATE hc_inventory_holds_v1 SET status='EXPIRED',updated_at=?
+    WHERE status='RESERVED' AND expires_at<=?
+    AND EXISTS (SELECT 1 FROM hc_live_order_holds m
+      JOIN izipay_live_orders o ON o.id=m.order_id
+      WHERE m.hold_id=hc_inventory_holds_v1.id AND o.paid_at IS NULL
+        AND o.status IN ('AWAITING_PAYMENT','AUTHORIZED','REJECTED','CANCELLED'))`)
+      .bind(cleanupNow,cleanupNow).run();
   const catalog=await data(env),selected=[],seen=new Set();let amount=0;
   for(const it of x.items){
     const id=String(it?.id??''),qty=Number(it?.qty);
