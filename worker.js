@@ -21,6 +21,8 @@ function sameOrigin(req){const o=req.headers.get('origin');return !o||o===new UR
 // IMPRESCINDIBLE: mantener false. La compuerta D1 por sí sola no habilita pagos.
 // Esta rutina está preparada, NO certificada para dinero real.
 const LIVE_RECONCILIATION_RELEASED=false;
+// Checkout real en preparación; prohibido activarlo antes de la auditoría integral.
+const LIVE_CHECKOUT_RELEASED=false;
 
 /** Reconciliación transaccional futura. Solo callable por la IPN firmada. */
 async function reconcileLiveOrder(env,{orderId,state,amount,currency,answer,receivedAt}){
@@ -34,6 +36,9 @@ async function reconcileLiveOrder(env,{orderId,state,amount,currency,answer,rece
   const txId=txs.find(t=>typeof t?.uuid==='string'&&/^[A-Za-z0-9-]{12,100}$/.test(t.uuid))?.uuid;
   if(!txId)throw new Error('TRANSACTION_ID_MISSING');
   if(order.gateway_transaction_id&&order.gateway_transaction_id!==txId)throw new Error('TRANSACTION_MISMATCH');
+  const usedTx=await env.DB.prepare(`SELECT id FROM izipay_live_orders
+    WHERE gateway_transaction_id=? AND id<>? LIMIT 1`).bind(txId,orderId).first();
+  if(usedTx)throw new Error('TRANSACTION_ALREADY_LINKED_TO_ANOTHER_ORDER');
   if(order.status==='PAID')return 'OK - already processed';
   if(['CANCELLED','REFUNDED','REFUND_PENDING'].includes(order.status))throw new Error('ORDER_TERMINAL');
   const holds=await env.DB.prepare(`SELECT m.product_id,m.quantity,m.hold_id,h.status AS hold_status,
@@ -43,6 +48,8 @@ async function reconcileLiveOrder(env,{orderId,state,amount,currency,answer,rece
   let items;
   try{items=JSON.parse(order.items_json)}catch{throw new Error('ITEMS_INVALID')}
   if(!Array.isArray(items)||!items.length||items.length!==holds.results.length)throw new Error('HOLD_ITEM_COUNT_MISMATCH');
+  if(new Set(holds.results.map(h=>h.hold_id)).size!==holds.results.length)
+    throw new Error('DUPLICATE_HOLD_LINK');
   const ids=new Set();let checkedTotal=0;
   for(const it of items){
     const id=String(it?.id),qty=Number(it?.qty),unit=Number(it?.unit_cents);
@@ -737,7 +744,107 @@ export default {async fetch(req,env){
    warning:'Todavía no se pueden cobrar tarjetas reales. Las credenciales de producción no significan que el flujo esté habilitado.'});
  }
  if(p==='/api/izipay/checkout-live'&&method==='POST'){
-  return json({error:'Los pagos reales están desactivados. No se ha iniciado ningún cobro.',mode:'disabled'},503);
+  // DOBLE BLOQUEO: no se cobra ni se reserva nada mientras la liberación esté en false.
+  if(!LIVE_CHECKOUT_RELEASED)return json({error:'Los pagos reales siguen desactivados.',mode:'disabled'},503);
+  const gate=await env.DB.prepare('SELECT enabled FROM hc_live_payment_gate WHERE id=1').first();
+  if(Number(gate?.enabled)!==1||!LIVE_RECONCILIATION_RELEASED)
+    return json({error:'La conciliación de pagos no está autorizada.',mode:'disabled'},503);
+  if(!env.IZIPAY_PROD_USER||!env.IZIPAY_PROD_PASSWORD||!env.IZIPAY_PROD_PUBLIC_KEY)
+    return json({error:'Falta configurar Izipay producción'},503);
+  const x=await requestJson(req);
+  // Obligatorio: la misma solicitud conserva una sola identidad, incluso tras timeouts.
+  // El cliente debe reutilizar la misma clave en cada reintento de la misma compra.
+  const idempotencyKey=String(x.idempotencyKey||'');
+  if(!/^[A-Za-z0-9_-]{16,100}$/.test(idempotencyKey))
+    return json({error:'Falta identificador de compra. Actualiza el carrito antes de pagar.'},400);
+  if(!Array.isArray(x.items)||x.items.length<1||x.items.length>20)
+    return json({error:'El carrito debe contener de 1 a 20 productos'},400);
+  const name=clean(x.name,120).trim(),email=clean(x.email,160).trim(),phone=clean(x.phone,30).trim(),
+    address=clean(x.address,300).trim(),district=clean(x.district,100).trim();
+  if(name.length<3||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||
+     !/^[+\d\s()-]{7,25}$/.test(phone)||address.length<5||district.length<2)
+    return json({error:'Completa los datos de entrega'},400);
+  const catalog=await data(env),selected=[],seen=new Set();let amount=0;
+  for(const it of x.items){
+    const id=String(it?.id??''),qty=Number(it?.qty);
+    if(!/^\d{1,12}$/.test(id)||seen.has(id)||!Number.isSafeInteger(qty)||qty<1||qty>10)
+      return json({error:'Productos o cantidades inválidos'},400);
+    seen.add(id);
+    const prod=catalog.products.find(q=>String(q.id)===id);
+    if(!prod)return json({error:'Producto inexistente o retirado del catálogo'},409);
+    const unit=Math.round(Number(prod.price)*100);
+    if(!Number.isSafeInteger(unit)||unit<1)return json({error:'Precio inválido'},409);
+    const stock=await env.DB.prepare('SELECT stock_on_hand,reserved_units FROM hc_inventory_stock_v1 WHERE product_id=?').bind(id).first();
+    if(!stock||Number(stock.stock_on_hand)-Number(stock.reserved_units)<qty)
+      return json({error:'Stock insuficiente para '+clean(prod.title,80)},409);
+    const subtotal=unit*qty;amount+=subtotal;
+    if(!Number.isSafeInteger(amount)||amount>20000000)return json({error:'Importe fuera de rango'},400);
+    selected.push({id,title:clean(prod.title,120),qty,unit_cents:unit,subtotal_cents:subtotal});
+  }
+  // Idempotencia fuerte: índice único D1 sobre buyer_json.idempotencyKey.
+  // La firma detecta una misma clave reutilizada con otro carrito o comprador.
+  selected.sort((a,b)=>a.id.localeCompare(b.id,'en',{numeric:true}));
+  const requestHash=await digest(JSON.stringify({items:selected.map(({id,qty,unit_cents})=>({id,qty,unit_cents})),name,email,phone,address,district}));
+  const existing=await env.DB.prepare(`SELECT id,status,buyer_json FROM izipay_live_orders
+    WHERE json_extract(buyer_json,'$.idempotencyKey')=?`).bind(idempotencyKey).first();
+  if(existing){
+    let prev;try{prev=JSON.parse(existing.buyer_json)}catch{return json({error:'Pedido anterior requiere revisión',orderId:existing.id},409)}
+    return json({error:prev.requestHash===requestHash?'Este pedido ya existe. Consulta su estado antes de reintentar el pago.':'Esta clave pertenece a otra compra.',orderId:existing.id,status:existing.status},409);
+  }
+  const orderId='HC-LIVE-'+crypto.randomUUID(),now=new Date().toISOString(),
+    expires=new Date(Date.now()+15*60*1000).toISOString();
+  const buyer={name,email,phone,address,district,shipping:'free_included',idempotencyKey,requestHash};
+  // D1.batch es transaccional: el pedido y TODAS las reservas se crean o ninguno.
+  const commands=[env.DB.prepare(`INSERT INTO izipay_live_orders
+    (id,items_json,amount_cents,shipping_cents,currency,buyer_json,status,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?)`).bind(orderId,JSON.stringify(selected),amount,0,'PEN',JSON.stringify(buyer),'AWAITING_PAYMENT',now,now)];
+  for(const it of selected){
+    const holdId='HC-HOLD-'+crypto.randomUUID();
+    commands.push(env.DB.prepare(`INSERT INTO hc_inventory_holds_v1
+      (id,idempotency_key,product_id,quantity,status,created_at,expires_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?)`).bind(holdId,orderId+':'+it.id,it.id,it.qty,'RESERVED',now,expires,now));
+    commands.push(env.DB.prepare(`INSERT INTO hc_live_order_holds
+      (order_id,product_id,hold_id,quantity) VALUES(?,?,?,?)`).bind(orderId,it.id,holdId,it.qty));
+  }
+  try{await env.DB.batch(commands)}catch(e){
+    // Otra solicitud concurrente pudo ganar el índice único: NO llamar dos veces a Izipay.
+    const winner=await env.DB.prepare(`SELECT id,status,buyer_json FROM izipay_live_orders
+      WHERE json_extract(buyer_json,'$.idempotencyKey')=?`).bind(idempotencyKey).first();
+    if(winner)return json({error:'Pedido existente; no se creará un segundo pago.',orderId:winner.id,status:winner.status},409);
+    console.error('Live order reservation rejected',String(e?.message||e));
+    return json({error:'No se pudo reservar el inventario. Actualiza el carrito.'},409);
+  }
+  // Se envía el importe calculado en el servidor; nunca el importe enviado por el cliente.
+  const basic=btoa(env.IZIPAY_PROD_USER+':'+env.IZIPAY_PROD_PASSWORD);
+  let response;
+  try{response=await fetch('https://api.micuentaweb.pe/api-payment/V4/Charge/CreatePayment',{
+    method:'POST',headers:{Authorization:'Basic '+basic,'Content-Type':'application/json',Accept:'application/json'},
+    body:JSON.stringify({amount,currency:'PEN',orderId,customer:{email}}),signal:AbortSignal.timeout(12000)
+  })}catch(e){
+    // Resultado incierto: NO liberar reservas ni reintentar el cargo automáticamente.
+    console.error('Izipay live create payment uncertain',String(e?.message||e));
+    return json({error:'Izipay no respondió. El pedido requiere revisión antes de reintentar.',orderId},503);
+  }
+  let payload;
+  try{payload=await response.json()}catch{
+    return json({error:'Respuesta no legible de Izipay; revisar antes de reintentar',orderId},502);
+  }
+  if(!response.ok||payload?.status!=='SUCCESS'||!payload?.answer?.formToken){
+    // Rechazo explícito de la creación del formulario: liberar solo reservas aún activas.
+    const cancel=[env.DB.prepare(`UPDATE izipay_live_orders SET status='CANCELLED',updated_at=?
+      WHERE id=? AND status='AWAITING_PAYMENT' AND paid_at IS NULL`).bind(new Date().toISOString(),orderId)];
+    for(const it of selected){
+      cancel.push(env.DB.prepare(`UPDATE hc_inventory_holds_v1 SET status='RELEASED',updated_at=?
+        WHERE id IN (SELECT hold_id FROM hc_live_order_holds WHERE order_id=? AND product_id=?)
+        AND status='RESERVED' AND EXISTS
+        (SELECT 1 FROM izipay_live_orders WHERE id=? AND status='CANCELLED' AND paid_at IS NULL)`)
+        .bind(new Date().toISOString(),orderId,it.id,orderId));
+    }
+    try{await env.DB.batch(cancel)}catch(e){console.error('Live checkout cancellation needs review',String(e?.message||e))}
+    return json({error:'Izipay no generó el formulario. No se ha cobrado.',orderId},502);
+  }
+  return json({mode:'live',orderId,amount,currency:'PEN',shippingCents:0,
+    formToken:payload.answer.formToken,publicKey:env.IZIPAY_PROD_PUBLIC_KEY});
  }
  if(p==='/api/session'&&method==='GET')return json({authenticated:await auth(req,env)});
  if(p==='/api/login'&&method==='POST'){
