@@ -18,11 +18,14 @@ function valid(p){return p.title&&p.category&&p.brand&&Number.isFinite(p.price)&
 async function requestJson(req){const len=Number(req.headers.get('content-length')||0);if(len>5_000_000)throw Error('Datos demasiado grandes');const t=await req.text();if(t.length>5_000_000)throw Error('Datos demasiado grandes');return JSON.parse(t||'{}')}
 function sameOrigin(req){const o=req.headers.get('origin');return !o||o===new URL(req.url).origin}
 
-// IMPRESCINDIBLE: mantener false. La compuerta D1 por sí sola no habilita pagos.
-// Esta rutina está preparada, NO certificada para dinero real.
-const LIVE_RECONCILIATION_RELEASED=false;
-// Checkout real en preparación; prohibido activarlo antes de la auditoría integral.
-const LIVE_CHECKOUT_RELEASED=false;
+// PRUEBA CONTROLADA AUTORIZADA: jamás abrir checkout a compradores hasta verificar el pago completo.
+// La IPN real sigue procesando el único pedido incluso después de que venza el plazo de prueba.
+const LIVE_RECONCILIATION_RELEASED=true;
+const LIVE_CHECKOUT_RELEASED=true;
+const LIVE_ADMIN_TEST_ONLY=true;
+const LIVE_ADMIN_TEST_UNTIL=Date.parse('2026-11-11T00:00:00.000Z');
+const LIVE_ADMIN_TEST_KEY='HC_ONE_ADMIN_PURCHASE_20261110';
+const LIVE_ADMIN_TEST_MAX_CENTS=1000; // máximo S/10.00, confirmado en el formulario antes de pagar
 
 /** Reconciliación transaccional futura. Solo callable por la IPN firmada. */
 async function reconcileLiveOrder(env,{orderId,state,amount,currency,answer,receivedAt}){
@@ -217,7 +220,7 @@ export default {async fetch(req,env){
   // Solo anuncia producción cuando AMBOS bloqueos y la compuerta D1 estén habilitados.
   const released=LIVE_CHECKOUT_RELEASED&&LIVE_RECONCILIATION_RELEASED;
   const gate=released?await env.DB.prepare('SELECT enabled FROM hc_live_payment_gate WHERE id=1').first():null;
-  const production=Boolean(released&&Number(gate?.enabled)===1&&env.IZIPAY_PROD_USER&&env.IZIPAY_PROD_PASSWORD&&env.IZIPAY_PROD_PUBLIC_KEY);
+  const production=Boolean(released&&Number(gate?.enabled)===1&&env.IZIPAY_PROD_USER&&env.IZIPAY_PROD_PASSWORD&&env.IZIPAY_PROD_PUBLIC_KEY&&(!LIVE_ADMIN_TEST_ONLY||(Date.now()<LIVE_ADMIN_TEST_UNTIL&&await auth(req,env))));
   return json({mode:production?'production':'test',ready:!!(env.IZIPAY_TEST_USER&&env.IZIPAY_TEST_PASSWORD&&env.IZIPAY_TEST_PUBLIC_KEY&&env.IZIPAY_TEST_HMAC),production,shippingCents:0});
  }
  if(p==='/api/izipay/create'&&method==='POST'){
@@ -773,6 +776,12 @@ export default {async fetch(req,env){
  if(p==='/api/izipay/checkout-live'&&method==='POST'){
   // DOBLE BLOQUEO: no se cobra ni se reserva nada mientras la liberación esté en false.
   if(!LIVE_CHECKOUT_RELEASED)return json({error:'Los pagos reales siguen desactivados.',mode:'disabled'},503);
+   if(LIVE_ADMIN_TEST_ONLY){
+     if(Date.now()>=LIVE_ADMIN_TEST_UNTIL)return json({error:'Venció la prueba limitada; checkout cerrado.',mode:'disabled'},503);
+     if(!await auth(req,env))return json({error:'Solo el administrador autenticado puede hacer esta compra controlada.'},403);
+     const index=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='hc_live_checkout_idempotency_v1'").first();
+     if(!index)return json({error:'No se activará la prueba sin índice de compra única.'},503);
+   }
   const gate=await env.DB.prepare('SELECT enabled FROM hc_live_payment_gate WHERE id=1').first();
   if(Number(gate?.enabled)!==1||!LIVE_RECONCILIATION_RELEASED)
     return json({error:'La conciliación de pagos no está autorizada.',mode:'disabled'},503);
@@ -781,7 +790,7 @@ export default {async fetch(req,env){
   const x=await requestJson(req);
   // Obligatorio: la misma solicitud conserva una sola identidad, incluso tras timeouts.
   // El cliente debe reutilizar la misma clave en cada reintento de la misma compra.
-  const idempotencyKey=String(x.idempotencyKey||'');
+  const idempotencyKey=LIVE_ADMIN_TEST_ONLY?LIVE_ADMIN_TEST_KEY:String(x.idempotencyKey||'');
   if(!/^[A-Za-z0-9_-]{16,100}$/.test(idempotencyKey))
     return json({error:'Falta identificador de compra. Actualiza el carrito antes de pagar.'},400);
   if(!Array.isArray(x.items)||x.items.length<1||x.items.length>20)
@@ -820,7 +829,8 @@ export default {async fetch(req,env){
     if(!Number.isSafeInteger(amount)||amount>20000000)return json({error:'Importe fuera de rango'},400);
     selected.push({id,title:clean(prod.title,120),qty,unit_cents:unit,subtotal_cents:subtotal});
   }
-  // Idempotencia fuerte: índice único D1 sobre buyer_json.idempotencyKey.
+  if(LIVE_ADMIN_TEST_ONLY&&amount>LIVE_ADMIN_TEST_MAX_CENTS)return json({error:'Prueba controlada limitada a S/10.00. Elige o crea un producto de prueba económico.',mode:'test_only'},409);
+   // Idempotencia fuerte: índice único D1 sobre buyer_json.idempotencyKey.
   // La firma detecta una misma clave reutilizada con otro carrito o comprador.
   selected.sort((a,b)=>a.id.localeCompare(b.id,'en',{numeric:true}));
   const requestHash=await digest(JSON.stringify({items:selected.map(({id,qty,unit_cents})=>({id,qty,unit_cents})),name,email,phone,address,district}));
@@ -832,7 +842,7 @@ export default {async fetch(req,env){
   }
   const orderId='HC-LIVE-'+crypto.randomUUID(),now=new Date().toISOString(),
     expires=new Date(Date.now()+15*60*1000).toISOString();
-  const buyer={name,email,phone,address,district,shipping:'free_included',idempotencyKey,requestHash};
+  const buyer={name,email,phone,address,district,shipping:'free_included',idempotencyKey,requestHash,adminControlledTest:LIVE_ADMIN_TEST_ONLY};
   // D1.batch es transaccional: el pedido y TODAS las reservas se crean o ninguno.
   const commands=[env.DB.prepare(`INSERT INTO izipay_live_orders
     (id,items_json,amount_cents,shipping_cents,currency,buyer_json,status,created_at,updated_at)
