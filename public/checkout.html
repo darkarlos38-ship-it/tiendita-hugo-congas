@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Finalizar compra | Tiendita Musical Hugo Congas</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#000;color:#f8f8f8;font:15px/1.55 Inter,system-ui,Arial,sans-serif}
+.top{height:5px;background:linear-gradient(90deg,#e94437,#ffc62b,#4bca69,#21b1e9)}.wrap{max-width:960px;margin:0 auto;padding:25px 18px 60px}
+a{color:#f9c929}h1{font-size:clamp(25px,4vw,38px);letter-spacing:-.04em;margin:24px 0 8px}.lead{color:#b8b8b8;margin:0 0 24px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:18px}.card{background:#141414;border:1px solid #323232;border-radius:15px;padding:23px}h2{font-size:19px;margin:0 0 17px}
+.item{border-bottom:1px solid #2a2a2a;padding:11px 0;display:flex;gap:16px;justify-content:space-between}.item:last-child{border:0}.item strong{white-space:nowrap}.sum{border-top:1px solid #444;margin-top:20px;padding-top:16px;display:flex;justify-content:space-between;font-size:20px;font-weight:800}
+label{display:block;margin:12px 0 5px;font-weight:650}input{display:block;width:100%;padding:12px 13px;background:#080808;color:#fff;border:1px solid #575757;border-radius:8px;font:inherit}input:focus{outline:2px solid #ffd44d;outline-offset:1px}
+button{background:#f8c52e;border:0;color:#090909;border-radius:8px;padding:14px 18px;font:inherit;font-weight:750;cursor:pointer;width:100%;margin-top:18px}button:disabled{cursor:not-allowed;opacity:.45}.hint{color:#acacac;font-size:13px}.status{margin-top:16px;min-height:24px;color:#f2c659;white-space:pre-wrap}.blocked{border:1px solid #544629;border-radius:10px;padding:12px 14px;background:#261f12;color:#f4d28a;margin-top:13px}.pay{margin-top:20px}.small{font-size:12px;color:#aaa;margin-top:17px}
+@media(max-width:740px){.grid{grid-template-columns:1fr}.card{padding:18px}}
+</style>
+</head>
+<body><div class="top"></div><main class="wrap">
+<a href="/">← Volver a la tienda</a><h1>Finalizar compra</h1>
+<p class="lead">Tiendita Musical Hugo Congas · Pagos en soles (PEN) · Envío gratis incluido en el precio</p>
+<div class="grid">
+<section class="card"><h2>Resumen de tu pedido</h2><div id="items">Cargando el carrito…</div><div class="sum"><span>Total estimado</span><span id="total">—</span></div><p class="hint">El total definitivo y la disponibilidad se validan en el servidor antes de crear el pago.</p></section>
+<section class="card"><h2>Datos para tu compra</h2>
+<form id="checkout-form" autocomplete="on">
+<label for="name">Nombres y apellidos</label><input id="name" name="name" required minlength="3" maxlength="120" autocomplete="name">
+<label for="email">Correo electrónico</label><input id="email" name="email" type="email" required maxlength="160" autocomplete="email">
+<label for="phone">Celular</label><input id="phone" name="phone" type="tel" required minlength="7" maxlength="25" autocomplete="tel">
+<label for="district">Distrito y ciudad</label><input id="district" name="district" required minlength="2" maxlength="100" placeholder="Ej. Ate, Lima">
+<label for="address">Dirección de entrega</label><input id="address" name="address" required minlength="5" maxlength="300" autocomplete="street-address">
+<button id="pay-button" disabled>Pago en línea no disponible</button>
+</form>
+<div id="blocked" class="blocked" role="status">Comprobando disponibilidad de pagos…</div>
+<p id="status" class="status" role="status" aria-live="polite"></p>
+<div id="payment" class="pay"></div>
+<p class="small">No ingreses datos de tarjeta fuera del formulario seguro de Izipay. Si ya intentaste pagar, no generes otro pedido antes de verificar el anterior.</p>
+</section></div>
+</main><script src="/checkout-live.js" defer></script></body></html>
