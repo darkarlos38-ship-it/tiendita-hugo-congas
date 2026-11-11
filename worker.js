@@ -128,6 +128,182 @@ async function reconcileLiveOrder(env,{orderId,state,amount,currency,answer,rece
   throw new Error('UNKNOWN_STATE');
 }
 
+// CUENTAS DE CLIENTES — módulo independiente del administrador y de Izipay.
+// Requiere MIGRACION-CUENTAS-CLIENTES.sql y secretos documentados.
+const HC_COOKIE='hc_customer';
+const hcNow=()=>Date.now();
+const hcCleanEmail=s=>String(s||'').trim().toLowerCase();
+const hcEmailOkay=s=>s.length<=254&&/^[^\s@<>]{1,64}@[^\s@<>]+\.[^\s@<>]{2,}$/.test(s);
+const hcRandom=(length=32)=>{const bytes=new Uint8Array(length);crypto.getRandomValues(bytes);return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('')};
+const hcOrigin=req=>new URL(req.url).origin;
+function hcCookie(req,name){
+  const raw=req.headers.get('Cookie')||'';
+  const found=raw.split(';').map(s=>s.trim()).find(x=>x.startsWith(name+'='));
+  return found?found.slice(name.length+1):'';
+}
+function hcCookieHeader(token,maxAge){
+  return `${HC_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Domain=tienditamusicalhugocongas.com; Max-Age=${maxAge}`;
+}
+function hcGoogleStateCookie(state,maxAge){return `hc_google_oauth=${state}; Path=/api/customer/google; HttpOnly; Secure; SameSite=Lax; Domain=tienditamusicalhugocongas.com; Max-Age=${maxAge}`}
+async function hcSession(req,env){
+  const token=hcCookie(req,HC_COOKIE);
+  if(!/^[0-9a-f]{64}$/.test(token))return null;
+  return await env.DB.prepare(`SELECT u.id,u.email,u.name,s.token_hash FROM hc_customer_sessions s
+    JOIN hc_customer_users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`)
+    .bind(await digest(token),hcNow()).first();
+}
+async function hcIssueSession(env,user){
+ const token=hcRandom(32);
+ await env.DB.prepare(`INSERT INTO hc_customer_sessions(token_hash,user_id,expires_at,created_at) VALUES(?,?,?,?)`)
+  .bind(await digest(token),user.id,hcNow()+30*86400000,hcNow()).run();
+ return hcCookieHeader(token,30*86400);
+}
+async function hcRateLimit(req,env){
+ const n=hcNow(),bucket=await digest('hc_mail:'+String(req.headers.get('CF-Connecting-IP')||'unknown')+':'+Math.floor(n/600000)+':'+String(env.CUSTOMER_OTP_PEPPER||''));
+ await env.DB.prepare(`INSERT INTO hc_customer_rate_limits(bucket,hits,expires_at) VALUES(?,1,?)
+  ON CONFLICT(bucket) DO UPDATE SET hits=hits+1,expires_at=excluded.expires_at`).bind(bucket,n+600000).run();
+ const row=await env.DB.prepare('SELECT hits FROM hc_customer_rate_limits WHERE bucket=?').bind(bucket).first();
+ return Number(row?.hits||999)<=8;
+}
+function hcCartValid(items,db){
+ if(!Array.isArray(items)||items.length>80)return false;
+ const allowed=new Set((db.products||[]).map(p=>String(p.id)));
+ const ids=new Set();
+ return items.every(x=>{
+  const id=String(x?.id||''),qty=Number(x?.qty);
+  if(!/^-?[1-9]\d{0,15}$/.test(id)||!Number.isSafeInteger(Number(id))||
+   !Number.isInteger(qty)||qty<1||qty>20||ids.has(id))return false;
+  ids.add(id);
+  return Number(id)<0||allowed.has(id);
+ });
+}
+async function hcCustomerRoute(req,env,p,method){
+ const url=new URL(req.url);
+ const n=hcNow();
+ if(p==='/api/customer/config'&&method==='GET')return json({emailEnabled:!!(env.CUSTOMER_RESEND_API_KEY&&env.CUSTOMER_MAIL_FROM&&env.CUSTOMER_OTP_PEPPER),googleEnabled:!!(env.CUSTOMER_GOOGLE_CLIENT_ID&&env.CUSTOMER_GOOGLE_CLIENT_SECRET)});
+ if(p==='/api/customer/me'&&method==='GET'){
+  const user=await hcSession(req,env);
+  return json({authenticated:!!user,user:user?{name:user.name,email:user.email}:null},200,{'Cache-Control':'no-store'});
+ }
+ if(p==='/api/customer/email/start'&&method==='POST'){
+  if(!env.CUSTOMER_RESEND_API_KEY||!env.CUSTOMER_MAIL_FROM||!env.CUSTOMER_OTP_PEPPER)
+   return json({error:'El acceso por correo todavía no está configurado.'},503);
+  const body=await requestJson(req),email=hcCleanEmail(body.email);
+  if(!hcEmailOkay(email))return json({error:'Escribe un correo electrónico válido.'},400);
+  if(!await hcRateLimit(req,env))return json({error:'Demasiados intentos. Prueba de nuevo más tarde.'},429);
+  const old=await env.DB.prepare('SELECT sent_at FROM hc_customer_email_codes WHERE email=?').bind(email).first();
+  if(old&&n-Number(old.sent_at)<60000)return json({sent:true,message:'Si ya lo solicitaste, revisa tu correo.'});
+  const number=new Uint32Array(1);crypto.getRandomValues(number);
+  const code=String(number[0]%1000000).padStart(6,'0');
+  const codeHash=await digest(email+':'+code+':'+env.CUSTOMER_OTP_PEPPER);
+  await env.DB.prepare(`INSERT INTO hc_customer_email_codes(email,code_hash,expires_at,attempts,sent_at)
+    VALUES(?,?,?,0,?) ON CONFLICT(email) DO UPDATE SET code_hash=excluded.code_hash,
+      expires_at=excluded.expires_at,attempts=0,sent_at=excluded.sent_at`)
+    .bind(email,codeHash,n+10*60000,n).run();
+  const res=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+env.CUSTOMER_RESEND_API_KEY,'Content-Type':'application/json'},body:JSON.stringify({from:env.CUSTOMER_MAIL_FROM,to:[email],subject:'Tu código de acceso — Tiendita Musical Hugo Congas',text:`Tu código de ingreso a Tiendita Musical Hugo Congas es: ${code}\n\nVálido por 10 minutos. Si no lo solicitaste, ignora este correo.`})});
+  if(!res.ok){console.error('Customer email delivery failed',res.status);return json({error:'No se pudo enviar el código. Intenta nuevamente.'},502)}
+  return json({sent:true,message:'Te enviamos un código de 6 dígitos.'});
+ }
+ if(p==='/api/customer/email/verify'&&method==='POST'){
+  const body=await requestJson(req),email=hcCleanEmail(body.email),code=String(body.code||'').trim();
+  if(!hcEmailOkay(email)||!/^\d{6}$/.test(code))return json({error:'Código o correo inválido.'},400);
+  const row=await env.DB.prepare('SELECT code_hash,expires_at,attempts FROM hc_customer_email_codes WHERE email=?').bind(email).first();
+  if(!row||Number(row.expires_at)<n||Number(row.attempts)>=5)return json({error:'Código vencido. Solicita otro.'},400);
+  await env.DB.prepare('UPDATE hc_customer_email_codes SET attempts=attempts+1 WHERE email=?').bind(email).run();
+  const check=await digest(email+':'+code+':'+env.CUSTOMER_OTP_PEPPER);
+  if(check!==row.code_hash)return json({error:'Código incorrecto.'},401);
+  await env.DB.prepare('DELETE FROM hc_customer_email_codes WHERE email=?').bind(email).run();
+  let user=await env.DB.prepare('SELECT id,email,name FROM hc_customer_users WHERE email=?').bind(email).first();
+  if(!user){
+   const id=crypto.randomUUID();
+   await env.DB.prepare('INSERT OR IGNORE INTO hc_customer_users(id,email,name,created_at) VALUES(?,?,?,?)').bind(id,email,'',n).run();
+   user=await env.DB.prepare('SELECT id,email,name FROM hc_customer_users WHERE email=?').bind(email).first();
+  }
+  return json({authenticated:true,email:user.email},200,{'Set-Cookie':await hcIssueSession(env,user),'Cache-Control':'no-store'});
+ }
+ if(p==='/api/customer/google/start'&&method==='GET'){
+  if(!env.CUSTOMER_GOOGLE_CLIENT_ID||!env.CUSTOMER_GOOGLE_CLIENT_SECRET)return json({error:'El acceso con Google todavía no está configurado.'},503);
+  const state=hcRandom(24),verifier=hcRandom(32);
+  const rawAdd=url.searchParams.get('add')||'';
+  const add=/^-?[1-9]\d{0,15}$/.test(rawAdd)&&Number.isSafeInteger(Number(rawAdd))?Number(rawAdd):null;
+  const challengeBytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier));
+  const challenge=btoa(String.fromCharCode(...new Uint8Array(challengeBytes))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  const redirect=env.CUSTOMER_GOOGLE_REDIRECT_URI||'https://tienditamusicalhugocongas.com/api/customer/google/callback';
+  await env.DB.prepare('INSERT INTO hc_customer_google_states(state_hash,code_verifier,expires_at,pending_id) VALUES(?,?,?,?)').bind(await digest(state),verifier,n+600000,add).run();
+  const google=new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  for(const [k,v] of Object.entries({client_id:env.CUSTOMER_GOOGLE_CLIENT_ID,redirect_uri:redirect,response_type:'code',scope:'openid email profile',state,code_challenge:challenge,code_challenge_method:'S256',prompt:'select_account'}))google.searchParams.set(k,v);
+  return new Response(null,{status:302,headers:{Location:google.href,'Set-Cookie':hcGoogleStateCookie(state,600),'Cache-Control':'no-store'}});
+ }
+ if(p==='/api/customer/google/callback'&&method==='GET'){
+  const state=url.searchParams.get('state')||'',code=url.searchParams.get('code')||'',cookie=hcCookie(req,'hc_google_oauth');
+  const fail=()=>new Response(null,{status:302,headers:{Location:'/?hc_login=failed','Set-Cookie':hcGoogleStateCookie('',0),'Cache-Control':'no-store'}});
+  if(!/^[0-9a-f]{48}$/.test(state)||state!==cookie||!code)return fail();
+  const hash=await digest(state);
+  const row=await env.DB.prepare('SELECT code_verifier,expires_at,pending_id FROM hc_customer_google_states WHERE state_hash=?').bind(hash).first();
+  await env.DB.prepare('DELETE FROM hc_customer_google_states WHERE state_hash=?').bind(hash).run();
+  if(!row||Number(row.expires_at)<n)return fail();
+  const redirect=env.CUSTOMER_GOOGLE_REDIRECT_URI||'https://tienditamusicalhugocongas.com/api/customer/google/callback';
+  const tokenRes=await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({code,client_id:env.CUSTOMER_GOOGLE_CLIENT_ID,client_secret:env.CUSTOMER_GOOGLE_CLIENT_SECRET,redirect_uri:redirect,grant_type:'authorization_code',code_verifier:row.code_verifier})});
+  if(!tokenRes.ok)return fail();
+  const token=await tokenRes.json();if(!token.access_token)return fail();
+  const infoRes=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+token.access_token},redirect:'error'});
+  if(!infoRes.ok)return fail();
+  const profile=await infoRes.json();
+  const email=hcCleanEmail(profile.email),sub=String(profile.sub||'');
+  if(!sub||!hcEmailOkay(email)||profile.email_verified!==true)return fail();
+  let user=await env.DB.prepare('SELECT * FROM hc_customer_users WHERE google_sub=?').bind(sub).first();
+  if(!user){
+   user=await env.DB.prepare('SELECT * FROM hc_customer_users WHERE email=?').bind(email).first();
+   if(user?.google_sub&&user.google_sub!==sub)return fail();
+   if(user){await env.DB.prepare('UPDATE hc_customer_users SET google_sub=? WHERE id=? AND google_sub IS NULL').bind(sub,user.id).run();}
+   else{
+    await env.DB.prepare('INSERT OR IGNORE INTO hc_customer_users(id,email,google_sub,name,created_at) VALUES(?,?,?,?,?)').bind(crypto.randomUUID(),email,sub,String(profile.name||'').slice(0,120),n).run();
+   }
+   user=await env.DB.prepare('SELECT * FROM hc_customer_users WHERE google_sub=?').bind(sub).first();
+  }
+  if(!user)return fail();
+  const cookieHeader=await hcIssueSession(env,user);
+  const destination='/?hc_login=google'+(row.pending_id!==null&&row.pending_id!==undefined?'&hc_add='+encodeURIComponent(String(row.pending_id)):'');
+  const heads=new Headers({Location:destination,'Cache-Control':'no-store'});
+  heads.append('Set-Cookie',cookieHeader);heads.append('Set-Cookie',hcGoogleStateCookie('',0));
+  return new Response(null,{status:302,headers:heads});
+ }
+ if(p==='/api/customer/logout'&&method==='POST'){
+  const token=hcCookie(req,HC_COOKIE);
+  if(/^[0-9a-f]{64}$/.test(token))await env.DB.prepare('DELETE FROM hc_customer_sessions WHERE token_hash=?').bind(await digest(token)).run();
+  return json({ok:true},200,{'Set-Cookie':hcCookieHeader('',0),'Cache-Control':'no-store'});
+ }
+ if(p==='/api/customer/delete'&&method==='POST'){
+  const user=await hcSession(req,env);
+  if(!user)return json({error:'Inicia sesión para eliminar tu cuenta.'},401);
+  const body=await requestJson(req);
+  if(body.confirm!=='BORRAR MI CUENTA')return json({error:'Confirmación inválida.'},400);
+  // Se elimina sólo la cuenta y su carrito. No modifica pedidos ni registros contables.
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM hc_customer_carts WHERE user_id=?').bind(user.id),
+    env.DB.prepare('DELETE FROM hc_customer_sessions WHERE user_id=?').bind(user.id),
+    env.DB.prepare('DELETE FROM hc_customer_users WHERE id=?').bind(user.id)
+  ]);
+  return json({ok:true},200,{'Set-Cookie':hcCookieHeader('',0),'Cache-Control':'no-store'});
+ }
+ if(p==='/api/customer/cart'&&['GET','PUT'].includes(method)){
+  const user=await hcSession(req,env);if(!user)return json({error:'Inicia sesión para guardar tu carrito.'},401);
+  if(method==='GET'){
+   const row=await env.DB.prepare('SELECT items_json FROM hc_customer_carts WHERE user_id=?').bind(user.id).first();
+   let items=[];try{items=JSON.parse(row?.items_json||'[]')}catch{}
+   return json({items},200,{'Cache-Control':'no-store'});
+  }
+  const body=await requestJson(req),db=await data(env);
+  if(!hcCartValid(body.items,db))return json({error:'El carrito contiene instrumentos inválidos o no disponibles.'},400);
+  const items=body.items.map(x=>({id:Number(x.id),qty:Number(x.qty)}));
+  await env.DB.prepare(`INSERT INTO hc_customer_carts(user_id,items_json,updated_at) VALUES(?,?,?)
+   ON CONFLICT(user_id) DO UPDATE SET items_json=excluded.items_json,updated_at=excluded.updated_at`)
+   .bind(user.id,JSON.stringify(items),n).run();
+  return json({ok:true,items},200,{'Cache-Control':'no-store'});
+ }
+ return json({error:'Ruta de clientes desconocida.'},404);
+}
+
 export default {async fetch(req,env){
  const url=new URL(req.url),p=url.pathname,method=req.method;
  try{
@@ -142,6 +318,7 @@ export default {async fetch(req,env){
  if(!p.startsWith('/api/'))return env.ASSETS.fetch(req);
  if(!env.DB)return json({error:'Falta conectar la base de datos D1'},503);
  if(!['GET','HEAD'].includes(method)&&p!=='/api/izipay/ipn'&&p!=='/api/izipay/production/ipn'&&!sameOrigin(req))return json({error:'Origen no autorizado'},403);
+ if(p.startsWith('/api/customer/'))return hcCustomerRoute(req,env,p,method);
 
 
  // IZIPAY PRODUCTION IPN RECEIVER (SAFE, DISABLED FOR LIVE PAYMENTS).
