@@ -1041,6 +1041,35 @@ if(/^\/api\/gestion\/pedidos\/HC-LIVE-[a-zA-Z0-9-]+$/.test(p)&&method==='PATCH')
   return json({ok:true,orderId:id,status,shippingReference});
 }
 
+ if (p === '/api/catalog-order' && method === 'PUT') {
+  const payload = await requestJson(req);
+  const values = payload?.ids;
+  if (!Array.isArray(values) || values.length > 3000 ||
+      !values.every(v => (typeof v === 'string' || typeof v === 'number') &&
+                         /^-?[1-9]\d{0,15}$/.test(String(v)) &&
+                         Number.isSafeInteger(Number(v)))) {
+    return json({error:'Lista de instrumentos inválida'},400);
+  }
+  const ids = values.map(String);
+  if (new Set(ids).size !== ids.length) return json({error:'ID de instrumento repetido'},400);
+  const row = await env.DB.prepare("SELECT value FROM appdata WHERE key='catalog'").first();
+  if (!row) return json({error:'Catálogo no inicializado'},409);
+  const db = JSON.parse(row.value);
+  const real = new Set((db.products||[]).map(x=>String(x.id)));
+  const received = new Set(ids);
+  if ([...real].some(id=>!received.has(id)) || ids.some(id=>Number(id)>0&&!real.has(id))) {
+    return json({error:'El inventario cambió. Recarga la tienda antes de ordenar.'},409);
+  }
+  db.settings ??= {};
+  db.settings.displayOrder = ids;
+  const result = await env.DB.prepare(
+    "UPDATE appdata SET value=? WHERE key='catalog' AND value=?"
+  ).bind(JSON.stringify(db),row.value).run();
+  if (Number(result.meta?.changes)!==1) {
+    return json({error:'Otro cambio del catálogo ocurrió a la vez. Recarga y reintenta.'},409);
+  }
+  return json({ok:true,ids});
+}
  if(p==='/api/logout'&&method==='POST'){
    await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await digest(cookie(req))).run();
    return json({ok:true},200,{'Set-Cookie':'hc_admin=; HttpOnly; SameSite=Strict; Secure; Path=/; Max-Age=0'});
