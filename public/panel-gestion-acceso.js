@@ -70,7 +70,7 @@ const LINK='/panel-gestion.html';function attach(){const workspace=document.getE
     const btn=document.createElement('button');btn.type='button';btn.className='hc-side-option';btn.dataset.sub=sub;btn.setAttribute('aria-current',String(active===category+'|'+sub));
     const label=document.createElement('span');label.textContent=sub;
     const small=document.createElement('small');small.textContent=String(count);
-    btn.append(label,small);
+    const check=document.createElement('span');check.className='dsp-check-box';check.style.display='none';btn.append(check,label,small);
     btn.addEventListener('click',e=>{
      e.preventDefault();e.stopPropagation();expanded=category;active=category+'|'+sub;
      if(typeof window.hcHGChoose==='function')window.hcHGChoose(category,sub);
