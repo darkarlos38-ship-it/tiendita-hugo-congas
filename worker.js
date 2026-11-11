@@ -246,7 +246,7 @@ async function hcCustomerRoute(req,env,p,method){
   const tokenRes=await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({code,client_id:env.CUSTOMER_GOOGLE_CLIENT_ID,client_secret:env.CUSTOMER_GOOGLE_CLIENT_SECRET,redirect_uri:redirect,grant_type:'authorization_code',code_verifier:row.code_verifier})});
   if(!tokenRes.ok)return fail();
   const token=await tokenRes.json();if(!token.access_token)return fail();
-  const infoRes=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+token.access_token},redirect:'error'});
+  const infoRes=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+token.access_token},redirect:'manual'});
   if(!infoRes.ok)return fail();
   const profile=await infoRes.json();
   const email=hcCleanEmail(profile.email),sub=String(profile.sub||'');
