@@ -180,8 +180,13 @@ function renderCustomerGallery(){
  const detail=document.getElementById('hc-inline-detail');
  if(!detail||detail.hidden)return;
  const imgWrap=detail.querySelector('.hc-detail-image');if(!imgWrap)return;
- const id=Number((typeof PRODUCTS!=='undefined'&&Array.isArray(PRODUCTS)?PRODUCTS:[]).find(p=>p.title===detail.querySelector('.hc-detail-name')?.textContent)?.id);
- const p=PRODUCTS.find(x=>Number(x.id)===id);if(!p)return;
+ const title = detail.querySelector('.hc-detail-name')?.textContent?.trim();
+const cover = imgWrap.querySelector('img')?.getAttribute('src');
+const p = PRODUCTS.find(x => x.title === title && x.image === cover)
+       || PRODUCTS.find(x => x.title === title);
+if (!p) return;
+const id = Number(p.id);
+imgWrap.dataset.hcProductId = String(id);
  const photos=[p.image,...(Array.isArray(p.gallery)?p.gallery:[])].filter(Boolean);
  if(photos.length<2)return;
  const key=String(id)+'|'+photos.join('|');if(imgWrap.dataset.hcGalleryKey===key)return;
