@@ -11,21 +11,48 @@ const SUB={
 const CAT={percusion:'Percusión Latina',audio:'Audio Profesional',vientos:'Vientos',cuerdas:'Guitarras y Cuerdas',bajos:'Bajos',teclados:'Teclados'};
 const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 const leaf=p=>String(p?.catLabel||'').split(',').pop().trim();
-const subMatches=(p,sub)=>{const s=norm(sub),v=norm(leaf(p)),t=norm(p.title);return !s||v===s||v.includes(s)||s.includes(v)&&v.length>3||((!v||v===norm(p.category))&&t.includes(s));};
+// Los títulos antiguos pueden decir CONTRA-CAMPANA o CONTRACAMPANA aunque
+// se hayan subido con una etiqueta genérica. Se clasifican correctamente al mostrar.
+const isContraCampana=p=>p?.category==='percusion'&&/\bcontra\s*campanas?\b/.test(norm(p.title));
+const leafFor=p=>isContraCampana(p)?'Contracampanas':leaf(p);
+const subMatches=(p,sub)=>{
+ const wanted=norm(sub),label=norm(leafFor(p)),title=norm(p.title);
+ if(!wanted)return true;
+ if(p?.category==='percusion'&&(wanted==='campanas'||wanted==='contracampanas')){
+   if(isContraCampana(p))return wanted==='contracampanas';
+   if(wanted==='contracampanas')return /\bcontra\s*campanas?\b/.test(title)||/\bcontra\s*campanas?\b/.test(label);
+   return /\bcampanas?\b/.test(label)||/\bcampanas?\b/.test(title);
+ }
+ return label===wanted||label.includes(wanted)||(wanted.includes(label)&&label.length>3)||((!label||label===norm(p.category))&&title.includes(wanted));
+};
+function classifyExisting(){
+ if(typeof PRODUCTS==='undefined'||!Array.isArray(PRODUCTS))return;
+ for(const p of PRODUCTS)if(isContraCampana(p))p.catLabel='Percusión Latina, Contracampanas';
+}
+
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&quot;'}[c]));
 const css=`
-#hc-inline-detail .hc-detail-image,.dsp-single-gallery{width:100%!important;max-width:420px!important;min-width:0!important;max-height:390px!important;overflow:hidden!important;display:flex!important;justify-content:center;align-items:center;background:#151515;border-radius:12px}
+#hc-inline-detail .hc-detail-image,.dsp-single-gallery{width:100%!important;max-width:420px!important;min-width:0!important;max-height:390px!important;overflow:hidden!important;display:flex!important;justify-content:center;align-items:center;background:#151515;border-radius:12px;position:relative!important;box-sizing:border-box!important}
 #hc-inline-detail .hc-detail-image img,.dsp-single-gallery img{max-width:100%!important;width:auto!important;max-height:350px!important;height:auto!important;object-fit:contain!important;cursor:zoom-in!important}
 #hc-inline-detail .hc-gallery-customer{width:min(100%,420px)!important;min-width:0!important;max-width:100%!important}
 #hc-inline-detail .hc-gallery-thumbs{display:flex!important;max-width:100%;flex-wrap:nowrap!important;overflow-x:auto;gap:7px!important;padding:6px 0}
 #hc-inline-detail .hc-gallery-thumbs button{flex:0 0 62px}
 #hc-inline-detail .hc-detail-grid img,.dsp-single-grid .dsp-single-gallery img{max-width:100%!important;max-height:350px!important;object-fit:contain!important}
 #hc-inline-detail .hc-detail-image ~ img,.dsp-single-gallery > img:not(:first-child){display:none!important}
+/* Flechas flotantes elegantes DENTRO de la foto, nunca al costado ni debajo. */
+#hc-inline-detail .hc-detail-image .hc-hg-nav{position:absolute!important;inset:0!important;z-index:5;display:flex!important;align-items:center!important;justify-content:space-between!important;margin:0!important;padding:10px!important;gap:0!important;pointer-events:none!important;background:transparent!important}
+#hc-inline-detail .hc-hg-nav button{pointer-events:auto!important;display:grid!important;place-items:center!important;flex:0 0 auto!important;width:40px!important;height:40px!important;padding:0!important;border:1px solid rgba(255,255,255,.32)!important;border-radius:50%!important;background:rgba(11,11,11,.77)!important;box-shadow:0 4px 15px rgba(0,0,0,.35)!important;color:#fff!important;font:bold 26px/1 Arial,sans-serif!important;transition:background .16s,transform .16s!important;cursor:pointer!important}
+#hc-inline-detail .hc-hg-nav button:hover,#hc-inline-detail .hc-hg-nav button:focus-visible{background:#e9bf22!important;color:#111!important;transform:scale(1.08)!important;outline:2px solid #f1d463!important;outline-offset:2px!important}
+#hc-inline-detail .hc-detail-image>img{max-width:calc(100% - 28px)!important;max-height:345px!important;border-radius:8px!important;object-fit:contain!important}
+#hc-inline-detail .hc-gallery-thumbs{margin:9px 0 0!important;padding:8px 0!important}
+#hc-inline-detail .hc-gallery-thumbs button{border-radius:9px!important;border:1px solid #555!important;opacity:.74;transition:opacity .18s,border-color .18s}
+#hc-inline-detail .hc-gallery-thumbs button[aria-pressed=true]{opacity:1;border:2px solid #f0c930!important}
+#hc-inline-detail .hc-detail-image:after{content:'Haz clic para ampliar';position:absolute;bottom:9px;left:50%;transform:translateX(-50%);font:12px Arial,sans-serif;color:#eee;background:rgba(0,0,0,.6);border-radius:999px;padding:4px 11px;pointer-events:none;white-space:nowrap}
 #hc-hg-lightbox[hidden]{display:none!important}#hc-hg-lightbox{position:fixed;z-index:2147483646;inset:0;background:rgba(0,0,0,.96);display:grid;grid-template-columns:60px minmax(0,1fr) 60px;grid-template-rows:55px minmax(0,1fr) 55px;align-items:center;justify-items:center;touch-action:pan-y;color:white}
-#hc-hg-lightbox img{grid-column:2;grid-row:2;max-width:100%;max-height:calc(100dvh - 120px);height:auto;width:auto;object-fit:contain}#hc-hg-lightbox button{border:1px solid #5c5c5c;color:white;background:#222;border-radius:50%;width:42px;height:42px;font:28px Arial;cursor:pointer}
+#hc-hg-lightbox img{grid-column:2;grid-row:2;max-width:100%;max-height:calc(100dvh - 120px);height:auto;width:auto;object-fit:contain}#hc-hg-lightbox button{border:1px solid #777;color:white;background:rgba(20,20,20,.82);border-radius:50%;width:46px;height:46px;font:28px Arial;cursor:pointer;display:grid;place-items:center;transition:background .18s,transform .18s}#hc-hg-lightbox button:hover,#hc-hg-lightbox button:focus-visible{background:#f1c731;color:#111;transform:scale(1.07);outline:2px solid #fff}
 #hc-hg-lightbox .hc-close{grid-column:3;grid-row:1}#hc-hg-lightbox .hc-prev{grid-column:1;grid-row:2}#hc-hg-lightbox .hc-next{grid-column:3;grid-row:2}#hc-hg-lightbox .hc-counter{grid-column:2;grid-row:3;color:#ddd;font:13px Arial}
 #hc-hg-categories{margin:15px 0;padding:14px;border:1px solid #494125;border-radius:12px;background:#141310;color:#fff}#hc-hg-categories label{display:block;font-weight:700;font-size:13px;margin-bottom:8px}#hc-hg-categories select{width:min(100%,380px);padding:10px;border-radius:9px;background:#181818;color:#fff;border:1px solid #555}
-@media(max-width:620px){#hc-inline-detail .hc-detail-image,.dsp-single-gallery{max-width:100%!important;max-height:310px!important}#hc-inline-detail .hc-detail-image img,.dsp-single-gallery img{max-height:270px!important}#hc-hg-lightbox{grid-template-columns:42px minmax(0,1fr) 42px}#hc-hg-lightbox button{width:36px;height:36px;font-size:24px}}
+@media(max-width:620px){#hc-inline-detail .hc-detail-image,.dsp-single-gallery{max-width:100%!important;max-height:310px!important}#hc-inline-detail .hc-detail-image img,.dsp-single-gallery img{max-height:270px!important}#hc-hg-lightbox{grid-template-columns:42px minmax(0,1fr) 42px}#hc-hg-lightbox button{width:36px;height:36px;font-size:24px}#hc-inline-detail .hc-hg-nav button{width:34px!important;height:34px!important;font-size:23px!important}#hc-inline-detail .hc-detail-image:after{font-size:10px}}
 `;
 const style=document.createElement('style');style.textContent=css;document.head.append(style);
 function setupAdmin(){const form=document.getElementById('hc-product-form');if(!form||form.dataset.hgSubcat)return;form.dataset.hgSubcat='1';const category=form.elements.namedItem('category'),old=form.elements.namedItem('catLabel');if(!category||!old)return;const latin=category.querySelector('option[value=percusion]');if(latin)latin.textContent='Percusión Latina';
@@ -36,12 +63,19 @@ function setupAdmin(){const form=document.getElementById('hc-product-form');if(!
  form.addEventListener('click',e=>{if(e.target?.closest?.('#hc-save-product'))return;},true);
  const list=document.getElementById('hc-item-list');if(list){list.addEventListener('click',e=>{if(e.target.closest('[data-edit]')){const id=Number(e.target.closest('[data-edit]').dataset.edit);queueMicrotask(()=>{const p=(typeof PRODUCTS!=='undefined'?PRODUCTS:[]).find(x=>Number(x.id)===id);rebuild(p?.catLabel||'')})}},true)}
  const newbtn=document.getElementById('hc-new');newbtn?.addEventListener('click',()=>queueMicrotask(()=>{rebuild('');sel.value=''}));
+ const titleField=form.elements.namedItem('title');
+ titleField?.addEventListener('input',()=>{
+   if(category.value==='percusion'&&isContraCampana({category:'percusion',title:titleField.value})){
+     const destination='Percusión Latina, Contracampanas';
+     if(sel.value!==destination){rebuild(destination);sel.value=destination;}
+   }
+ });
  const bar=document.querySelector('#hc-workspace .hc-admin-actions');if(bar&&!document.getElementById('hc-hg-orders-link')){const a=document.createElement('a');a.id='hc-hg-orders-link';a.textContent='📦 Pedidos pagados';a.href='/gestion-pedidos.html';a.style.cssText='padding:10px 12px;background:#ffd400;color:#000;border-radius:8px;font-weight:800;text-decoration:none';bar.prepend(a)}
 }
 // Un filtro adicional real, sin sustituir el catálogo ni sus rutinas de precios/stock.
 let selected={cat:'',sub:''};let wrapped=false;
 function applySubFilter(){const grid=document.getElementById('archiveProductsGrid');if(!grid)return;const prod=typeof PRODUCTS!=='undefined'?PRODUCTS:[];let count=0;for(const card of grid.querySelectorAll('li.dsp-prod-card')){const h=card.querySelector('[onclick*="openProductSheet"]');const id=Number((h?.getAttribute('onclick')||'').match(/openProductSheet\((\d+)\)/)?.[1]);const p=prod.find(q=>Number(q.id)===id);const show=!selected.sub||(p&&p.category===selected.cat&&subMatches(p,selected.sub));card.hidden=!show;card.style.display=show?'':'none';if(show)count++}if(selected.sub){grid.querySelectorAll('li.dsp-mid').forEach(el=>el.style.display='none');const counter=document.getElementById('archiveCountText');if(counter)counter.textContent=`${count} ${count===1?'producto':'productos'} en ${selected.sub}`}}
-function setupCategories(){const grid=document.getElementById('archiveProductsGrid');if(!grid)return;
+function setupCategories(){const grid=document.getElementById('archiveProductsGrid');if(!grid)return;classifyExisting();
  if(!document.getElementById('hc-hg-categories')){const container=document.createElement('div');container.id='hc-hg-categories';const label=document.createElement('label');label.textContent='Explora por categoría y tipo de instrumento';const select=document.createElement('select');select.setAttribute('aria-label','Filtrar subcategorías');container.append(label,select);grid.parentNode.insertBefore(container,grid);const rebuild=()=>{select.replaceChildren(new Option('Todas las subcategorías',''));for(const [cat,subs] of Object.entries(SUB))for(const sub of subs)select.add(new Option(`${CAT[cat]} → ${sub}`,`${cat}|${sub}`))};rebuild();select.addEventListener('change',()=>{const [cat,sub]=select.value.split('|');selected={cat:cat||'',sub:sub||''};if(cat&&typeof window.filterCatalog==='function')window.filterCatalog(cat);else if(typeof window.filterCatalog==='function')window.filterCatalog('all');applySubFilter()});window.hcHGChoose=(cat,sub)=>{const target=[...select.options].find(o=>o.value===`${cat}|${sub}`)||[...select.options].find(o=>o.value.startsWith(cat+'|')&&norm(o.textContent).includes(norm(sub)));if(target){select.value=target.value;select.dispatchEvent(new Event('change'))}else{selected={cat:'',sub:''};window.filterCatalog?.(cat)}};
  }
  if(!wrapped&&typeof window.renderArchiveGrid==='function'){const orig=window.renderArchiveGrid;window.renderArchiveGrid=function(...args){const v=orig.apply(this,args);applySubFilter();return v};wrapped=true}
@@ -62,7 +96,7 @@ function photoSet(){const title=document.querySelector('#hc-inline-detail .hc-de
 function setupGallery(){const legacy=document.getElementById('productSheetContent');if(legacy&&!legacy.dataset.hgLegacy){legacy.dataset.hgLegacy='1';legacy.addEventListener('click',e=>{const img=e.target.closest('.dsp-single-gallery img');if(!img)return;const title=legacy.querySelector('h2')?.textContent;const p=(typeof PRODUCTS!=='undefined'?PRODUCTS:[]).find(x=>x.title===title);const photos=p?[p.image,...(Array.isArray(p.gallery)?p.gallery:[])]:[img.src];open(photos,Math.max(0,photos.indexOf(img.getAttribute('src'))))})}const detail=document.getElementById('hc-inline-detail');if(!detail||detail.dataset.hgClick)return;detail.dataset.hgClick='1';detail.addEventListener('click',e=>{const el=e.target.closest('.hc-detail-image img');if(!el)return;const photos=photoSet();open(photos.length?photos:[el.src],Math.max(0,photos.indexOf(el.getAttribute('src'))))});
  document.addEventListener('keydown',e=>{const root=document.getElementById('hc-hg-lightbox');if(!root||root.hidden)return;if(e.key==='Escape')close();if(e.key==='ArrowRight')move(1);if(e.key==='ArrowLeft')move(-1)});
  // Añadir botones de navegación justo debajo de la foto principal.
- let scheduled=false;const observe=new MutationObserver(()=>{if(scheduled)return;scheduled=true;requestAnimationFrame(()=>{scheduled=false;const d=document.getElementById('hc-inline-detail');if(!d||d.hidden)return;const holder=d.querySelector('.hc-gallery-customer')||d.querySelector('.hc-detail-image');if(!holder||holder.querySelector('.hc-hg-nav'))return;const photos=photoSet();if(photos.length<2)return;const bar=document.createElement('div');bar.className='hc-hg-nav';bar.style.cssText='display:flex;gap:8px;justify-content:center;margin:8px 0';bar.innerHTML='<button type="button" aria-label="Imagen anterior">← Anterior</button><button type="button" aria-label="Imagen siguiente">Siguiente →</button>';for(const b of bar.querySelectorAll('button'))b.style.cssText='background:#252525;color:white;border:1px solid #777;border-radius:8px;padding:9px 12px;cursor:pointer';bar.children[0].onclick=()=>cycle(-1);bar.children[1].onclick=()=>cycle(1);holder.appendChild(bar)})});observe.observe(detail,{childList:true,subtree:true});
+ let scheduled=false;const observe=new MutationObserver(()=>{if(scheduled)return;scheduled=true;requestAnimationFrame(()=>{scheduled=false;const d=document.getElementById('hc-inline-detail');if(!d||d.hidden)return;const holder=d.querySelector('.hc-detail-image');if(!holder||holder.querySelector('.hc-hg-nav'))return;const photos=photoSet();if(photos.length<2)return;const bar=document.createElement('div');bar.className='hc-hg-nav';bar.innerHTML='<button type="button" aria-label="Fotografía anterior" title="Anterior">‹</button><button type="button" aria-label="Fotografía siguiente" title="Siguiente">›</button>';bar.children[0].onclick=()=>cycle(-1);bar.children[1].onclick=()=>cycle(1);holder.appendChild(bar)})});observe.observe(detail,{childList:true,subtree:true});
  function cycle(delta){const photos=photoSet();if(photos.length<2)return;const im=detail.querySelector('.hc-detail-image img');if(!im)return;let i=photos.indexOf(im.getAttribute('src'));if(i<0)i=0;i=(i+delta+photos.length)%photos.length;im.src=photos[i];detail.querySelectorAll('.hc-gallery-thumbs button').forEach((el,j)=>el.setAttribute('aria-pressed',String(j===i)))}
 }
 function init(){setupAdmin();setupCategories();setupGallery();const obs=new MutationObserver(()=>{setupAdmin();setupCategories()});obs.observe(document.body,{childList:true,subtree:true})}
