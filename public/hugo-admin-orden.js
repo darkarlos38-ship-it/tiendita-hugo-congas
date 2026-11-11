@@ -360,7 +360,60 @@
  .ds-cat__img-wrap{overflow:hidden;border-radius:10px;background:#151515!important}
  .ds-cat__img-wrap img.hc-category-photo{filter:contrast(1.03) saturate(1.05)!important}
  .dsp-ls__img img.hc-category-photo{object-fit:contain!important}
- `;document.head.appendChild(css);
+ 
+ /* Tarjetas fotográficas cinematográficas: imagen sin cuadro, fundida con el negro. */
+ #homeCategoriesGrid .ds-cat{
+   position:relative!important;isolation:isolate!important;overflow:hidden!important;
+   background:#111!important;border:1px solid rgba(255,255,255,.10);
+   min-height:180px;
+ }
+ #homeCategoriesGrid .ds-cat:hover{
+   background:#111!important;box-shadow:0 16px 36px rgba(0,0,0,.38)!important;
+ }
+ #homeCategoriesGrid .ds-cat .ds-cat__txt{
+   position:relative;z-index:2;flex:1 1 auto;max-width:75%;
+ }
+ #homeCategoriesGrid .ds-cat .ds-cat__img-wrap{
+   position:absolute!important;inset:0 0 0 auto!important;
+   width:78%!important;height:100%!important;
+   display:block!important;flex:none!important;overflow:hidden!important;
+   border:none!important;border-radius:0!important;
+   background:transparent!important;pointer-events:none!important;
+   transform:none!important;
+ }
+ #homeCategoriesGrid .ds-cat:hover .ds-cat__img-wrap{transform:none!important}
+ #homeCategoriesGrid .ds-cat .ds-cat__img-wrap img.hc-category-photo{
+   position:absolute!important;inset:0!important;width:100%!important;height:100%!important;
+   object-fit:cover!important;object-position:center center!important;
+   border:0!important;border-radius:0!important;
+   mix-blend-mode:normal!important;
+   filter:contrast(1.055) saturate(1.045) brightness(.88)!important;
+   transform:scale(1.015);transition:transform .5s ease,filter .5s ease;
+ }
+ #homeCategoriesGrid .ds-cat:hover .ds-cat__img-wrap img.hc-category-photo{
+   transform:scale(1.075)!important;
+   filter:contrast(1.06) saturate(1.08) brightness(.98)!important;
+ }
+ #homeCategoriesGrid .ds-cat .ds-cat__img-wrap::after{
+   content:"";position:absolute;inset:-1px;z-index:1;pointer-events:none;
+   background:
+     linear-gradient(90deg,#111 0%,rgba(17,17,17,.98) 12%,rgba(17,17,17,.70) 35%,rgba(17,17,17,.18) 70%,rgba(17,17,17,.05) 100%),
+     linear-gradient(180deg,#111 0%,transparent 17%,transparent 78%,#111 100%);
+ }
+ @media(max-width:767px){
+   #homeCategoriesGrid .ds-cat{
+     min-height:184px!important;padding:14px!important;
+     flex-direction:row!important;align-items:flex-end!important;
+   }
+   #homeCategoriesGrid .ds-cat .ds-cat__txt{max-width:100%;width:100%;padding-top:63px}
+   #homeCategoriesGrid .ds-cat .ds-cat__img-wrap{width:100%!important;height:100%!important}
+   #homeCategoriesGrid .ds-cat .ds-cat__img-wrap::after{
+     background:
+       linear-gradient(0deg,#111 0%,rgba(17,17,17,.96) 21%,rgba(17,17,17,.22) 71%,rgba(17,17,17,.05) 100%),
+       linear-gradient(90deg,rgba(17,17,17,.60),transparent 85%);
+   }
+ }
+`;document.head.appendChild(css);
  // Los iconos de navegación (carrito, flechas, menú) siguen siendo iconos funcionales.
  if(typeof window.getInstrumentSVG==='function'){window.getInstrumentSVG=picture}
  // Respaldo: fotografías en elementos ya renderizados antes de este módulo.
