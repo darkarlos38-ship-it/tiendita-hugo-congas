@@ -22,9 +22,18 @@ function sameOrigin(req){const o=req.headers.get('origin');return !o||o===new UR
 // La IPN real sigue procesando el único pedido incluso después de que venza el plazo de prueba.
 const LIVE_RECONCILIATION_RELEASED=true;
 const LIVE_CHECKOUT_RELEASED=true;
-const LIVE_ADMIN_TEST_ONLY=true;
-const LIVE_ADMIN_TEST_UNTIL=Date.parse('2026-11-11T00:00:00.000Z');
-const LIVE_ADMIN_TEST_KEY='HC_ONE_ADMIN_PURCHASE_20261110';
+// El modo antiguo de prueba limitada ya terminó. El checkout público requiere
+// DOS comprobaciones independientes: autorización Cloudflare + gate D1.
+// La autorización de Cloudflare está AUSENTE por defecto: fail-closed.
+const LIVE_ADMIN_TEST_ONLY=false;
+// Prueba productiva controlada: acceso exclusivo del administrador, una sola orden
+// y hasta S/ 10.00. También está CERRADA por defecto hasta autorización Cloudflare.
+const LIVE_ADMIN_PILOT_APPROVAL='ALLOW_SINGLE_ADMIN_LIVE_PAYMENT_20261111';
+const livePilotAllowed=env=>String(env.IZIPAY_ADMIN_LIVE_TEST_APPROVED||'')===LIVE_ADMIN_PILOT_APPROVAL;
+const LIVE_PUBLIC_APPROVAL_VALUE='OPEN_CONFIRMED_IZIPAY_20261111';
+const livePublicApproved=env=>String(env.IZIPAY_PUBLIC_CHECKOUT_APPROVED||'')===LIVE_PUBLIC_APPROVAL_VALUE;
+const LIVE_ADMIN_TEST_UNTIL=Date.parse('2026-11-15T00:00:00.000Z');
+const LIVE_ADMIN_TEST_KEY='HC_ONE_ADMIN_PURCHASE_20261111';
 const LIVE_ADMIN_TEST_MAX_CENTS=1000; // máximo S/10.00, confirmado en el formulario antes de pagar
 
 /** Reconciliación transaccional futura. Solo callable por la IPN firmada. */
@@ -397,7 +406,13 @@ export default {async fetch(req,env){
   // Solo anuncia producción cuando AMBOS bloqueos y la compuerta D1 estén habilitados.
   const released=LIVE_CHECKOUT_RELEASED&&LIVE_RECONCILIATION_RELEASED;
   const gate=released?await env.DB.prepare('SELECT enabled FROM hc_live_payment_gate WHERE id=1').first():null;
-  const production=Boolean(released&&Number(gate?.enabled)===1&&env.IZIPAY_PROD_USER&&env.IZIPAY_PROD_PASSWORD&&env.IZIPAY_PROD_PUBLIC_KEY&&(!LIVE_ADMIN_TEST_ONLY||(Date.now()<LIVE_ADMIN_TEST_UNTIL&&await auth(req,env))));
+  // Mostrar checkout real únicamente al público autorizado o en el ensayo exclusivo admin.
+  let adminPilot=false;
+  if(!livePublicApproved(env)&&livePilotAllowed(env)&&Date.now()<LIVE_ADMIN_TEST_UNTIL&&await auth(req,env)){
+    const already=await env.DB.prepare("SELECT id FROM izipay_live_orders WHERE json_extract(buyer_json,'$.idempotencyKey')=? LIMIT 1").bind(LIVE_ADMIN_TEST_KEY).first();
+    adminPilot=!already;
+  }
+  const production=Boolean((livePublicApproved(env)||adminPilot)&&released&&Number(gate?.enabled)===1&&env.IZIPAY_PROD_USER&&env.IZIPAY_PROD_PASSWORD&&env.IZIPAY_PROD_PUBLIC_KEY);
   return json({mode:production?'production':'test',ready:!!(env.IZIPAY_TEST_USER&&env.IZIPAY_TEST_PASSWORD&&env.IZIPAY_TEST_PUBLIC_KEY&&env.IZIPAY_TEST_HMAC),production,shippingCents:0});
  }
  if(p==='/api/izipay/create'&&method==='POST'){
@@ -918,9 +933,12 @@ export default {async fetch(req,env){
   const stocksById=new Map((stocks.results||[]).map(x=>[String(x.product_id),x]));
   const fulfillsByOrder=new Map();
   for(const f of fulfillments.results||[]){if(!fulfillsByOrder.has(f.order_id))fulfillsByOrder.set(f.order_id,[]);fulfillsByOrder.get(f.order_id).push(f)}
+  const publicOpen=Boolean(livePublicApproved(env)&&LIVE_CHECKOUT_RELEASED&&LIVE_RECONCILIATION_RELEASED&&Number(gate?.enabled)===1&&env.IZIPAY_PROD_USER&&env.IZIPAY_PROD_PASSWORD&&env.IZIPAY_PROD_PUBLIC_KEY);
   const records=(orders.results||[]).map(o=>{
    const warnings=[],attached=holdsByOrder.get(o.id)||[],ev=eventsByOrder.get(o.id)||[],deb=fulfillsByOrder.get(o.id)||[];
    if(o.shipping_cents!==0||o.currency!=='PEN')warnings.push('Moneda o envío no coincide con política');
+    if(o.status==='AWAITING_PAYMENT'&&Date.now()-Date.parse(o.created_at)>30*60*1000&&ev.length===0)
+      warnings.push('Pedido antiguo sin IPN: comprobar su estado en el Backoffice Izipay');
    if(o.status==='PAID'&&!ev.some(x=>x.verified===1&&x.processing_status==='GATE_CLOSED_PAID'))warnings.push('Pedido PAID sin evento IPN pagado verificado');
    if(o.status==='PAID'&&attached.length===0)warnings.push('Pedido pagado sin reservas asociadas');
    if(deb.length&&o.status!=='PAID')warnings.push('Descuento de inventario sin pedido PAID');
@@ -934,31 +952,47 @@ export default {async fetch(req,env){
     reservations:attached.length,verifiedPaidNotifications:ev.filter(x=>x.verified===1&&x.processing_status==='GATE_CLOSED_PAID').length,
     settlements:deb.length,warnings};
   });
-  return json({phase:'PREPRODUCCION',gateEnabled:Number(gate?.enabled||0)===1,realPaymentsAllowed:false,
-    missingTables:[],orders:records,warning:'Auditoría de solo lectura. No es una autorización para cobrar. La IPN actual registra eventos, pero no reconcilia pedidos ni descuenta stock.'});
+  return json({phase:publicOpen?'PRODUCCION_PUBLICA':'PREPRODUCCION',gateEnabled:Number(gate?.enabled||0)===1,
+    publicApprovalConfigured:livePublicApproved(env),realPaymentsAllowed:publicOpen,
+    reconciliationConfigured:LIVE_RECONCILIATION_RELEASED&&Number(gate?.enabled||0)===1,
+    missingTables:[],orders:records,
+    warning:publicOpen
+      ? 'Checkout público abierto. La IPN firmada concilia pagos y stock; revisar periódicamente avisos y reembolsos.'
+      : 'Checkout público CERRADO. Las IPN auténticas de pedidos existentes pueden seguir conciliándose. Verificar el pedido antiguo en Izipay antes de activar la autorización pública.'});
  }
 
  if(p==='/api/izipay/production-readiness'&&method==='GET'){
   if(!await auth(req,env))return json({error:'Solo administrador'},401);
   const keys=['IZIPAY_PROD_USER','IZIPAY_PROD_PASSWORD','IZIPAY_PROD_PUBLIC_KEY','IZIPAY_PROD_HMAC'];
   const present=Object.fromEntries(keys.map(k=>[k,Boolean(env[k])]));
+  const liveGate=await env.DB.prepare('SELECT enabled FROM hc_live_payment_gate WHERE id=1').first();
+  const publicOpen=Boolean(livePublicApproved(env)&&LIVE_CHECKOUT_RELEASED&&LIVE_RECONCILIATION_RELEASED&&Number(liveGate?.enabled)===1&&env.IZIPAY_PROD_USER&&env.IZIPAY_PROD_PASSWORD&&env.IZIPAY_PROD_PUBLIC_KEY);
+
   const tables=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('izipay_checkout_test_orders','izipay_live_orders','izipay_stock_reservations_stage')").all();
   const found=new Set((tables.results||[]).map(x=>x.name));
-  return json({phase:'PREPRODUCCION',livePaymentsEnabled:false,keysConfigured:present,
+  return json({phase:publicOpen?'PRODUCCION_PUBLICA':'PREPRODUCCION',livePaymentsEnabled:publicOpen,publicApprovalConfigured:livePublicApproved(env),gateEnabled:Number(liveGate?.enabled||0)===1,keysConfigured:present,
    d1LiveOrdersTable:found.has('izipay_live_orders'),testCheckoutTable:found.has('izipay_checkout_test_orders'),
    r2Connected:Boolean(env.MEDIA_BUCKET),shipping:{mode:'free_included',shippingCents:0},stagingStockReservationsTable:found.has('izipay_stock_reservations_stage'),
-   pending:['Mostrar envío gratis en carrito definitivo y documentos de compra','Integrar las reservas atómicas ensayadas con pago real y actualizaciones de stock del administrador','Implementar idempotencia en las operaciones reales con Izipay y evitar doble cobro','Implementar y probar IPN de producción con clave de producción, separada de TEST','Conciliación de transacciones, reembolsos y pedidos rechazados','Pruebas de producción de bajo importe autorizadas por el titular'],
-   warning:'Todavía no se pueden cobrar tarjetas reales. Las credenciales de producción no significan que el flujo esté habilitado.'});
+   pending:publicOpen?['Supervisar pagos firmados, inventario y estados de reembolso en Izipay']:[
+     'Confirmar en Backoffice Izipay que el pedido HC-LIVE-34ebb6c1-56d0-4631-aa8f-e23677ad8640 NO fue cobrado, o conciliarlo manualmente si sí lo fue',
+     'Validar conciliación real controlada y política de pagos tardíos y reembolsos antes de apertura pública',
+     'Configurar la variable IZIPAY_PUBLIC_CHECKOUT_APPROVED únicamente tras confirmar los pasos anteriores'],
+   warning:publicOpen?'Cobros públicos habilitados con autorización de producción. Monitorizar IPN y pedidos.':'Checkout público cerrado por autorización adicional de Cloudflare; las notificaciones válidas de pedidos anteriores siguen habilitadas.'});
  }
  if(p==='/api/izipay/checkout-live'&&method==='POST'){
   // DOBLE BLOQUEO: no se cobra ni se reserva nada mientras la liberación esté en false.
-  if(!LIVE_CHECKOUT_RELEASED)return json({error:'Los pagos reales siguen desactivados.',mode:'disabled'},503);
-   if(LIVE_ADMIN_TEST_ONLY){
+  const adminPilot=!livePublicApproved(env)&&livePilotAllowed(env)&&Date.now()<LIVE_ADMIN_TEST_UNTIL&&await auth(req,env);
+  if(!LIVE_CHECKOUT_RELEASED||(!livePublicApproved(env)&&!adminPilot))return json({error:'Los pagos reales siguen desactivados. Solo se admite prueba de administrador si se autorizó expresamente.',mode:'disabled'},503);
+   if(adminPilot){
      if(Date.now()>=LIVE_ADMIN_TEST_UNTIL)return json({error:'Venció la prueba limitada; checkout cerrado.',mode:'disabled'},503);
      if(!await auth(req,env))return json({error:'Solo el administrador autenticado puede hacer esta compra controlada.'},403);
      const index=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='hc_live_checkout_idempotency_v1'").first();
      if(!index)return json({error:'No se activará la prueba sin índice de compra única.'},503);
    }
+  // Verificar índice de idempotencia tanto para admin como para compradores públicos.
+  // Sin él jamás crear un intento de pago.
+  const publicUniqueIndex=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='hc_live_checkout_idempotency_v1'").first();
+  if(!publicUniqueIndex)return json({error:'Falta índice de compra única en D1. No se admiten cobros.',mode:'disabled'},503);
   const gate=await env.DB.prepare('SELECT enabled FROM hc_live_payment_gate WHERE id=1').first();
   if(Number(gate?.enabled)!==1||!LIVE_RECONCILIATION_RELEASED)
     return json({error:'La conciliación de pagos no está autorizada.',mode:'disabled'},503);
@@ -967,7 +1001,7 @@ export default {async fetch(req,env){
   const x=await requestJson(req);
   // Obligatorio: la misma solicitud conserva una sola identidad, incluso tras timeouts.
   // El cliente debe reutilizar la misma clave en cada reintento de la misma compra.
-  const idempotencyKey=LIVE_ADMIN_TEST_ONLY?LIVE_ADMIN_TEST_KEY:String(x.idempotencyKey||'');
+  const idempotencyKey=adminPilot?LIVE_ADMIN_TEST_KEY:String(x.idempotencyKey||'');
   if(!/^[A-Za-z0-9_-]{16,100}$/.test(idempotencyKey))
     return json({error:'Falta identificador de compra. Actualiza el carrito antes de pagar.'},400);
   if(!Array.isArray(x.items)||x.items.length<1||x.items.length>20)
@@ -1007,11 +1041,11 @@ export default {async fetch(req,env){
     if(!Number.isSafeInteger(amount)||amount>20000000)return json({error:'Importe fuera de rango'},400);
     selected.push({id,title:clean(prod.title,120),qty,unit_cents:unit,subtotal_cents:subtotal});
   }
-  if(LIVE_ADMIN_TEST_ONLY&&amount>LIVE_ADMIN_TEST_MAX_CENTS)return json({error:'Prueba controlada limitada a S/10.00. Elige o crea un producto de prueba económico.',mode:'test_only'},409);
+  if(adminPilot&&amount>LIVE_ADMIN_TEST_MAX_CENTS)return json({error:'Prueba controlada limitada a S/10.00. Elige o crea un producto de prueba económico.',mode:'test_only'},409);
    // Idempotencia fuerte: índice único D1 sobre buyer_json.idempotencyKey.
   // La firma detecta una misma clave reutilizada con otro carrito o comprador.
   selected.sort((a,b)=>a.id.localeCompare(b.id,'en',{numeric:true}));
-  const requestHash=await digest(JSON.stringify({items:selected.map(({id,qty,unit_cents})=>({id,qty,unit_cents})),name,email,phone,address,district}));
+  const requestHash=await digest(JSON.stringify({items:selected.map(({id,qty,unit_cents})=>({id,qty,unit_cents})),name,email,phone,address,district,dni:clean(x.dni||'',20),deliveryReference:clean(x.deliveryReference||'',180)}));
   const existing=await env.DB.prepare(`SELECT id,status,buyer_json FROM izipay_live_orders
     WHERE json_extract(buyer_json,'$.idempotencyKey')=?`).bind(idempotencyKey).first();
   if(existing){
@@ -1020,7 +1054,7 @@ export default {async fetch(req,env){
   }
   const orderId='HC-LIVE-'+crypto.randomUUID(),now=new Date().toISOString(),
     expires=new Date(Date.now()+15*60*1000).toISOString();
-  const buyer={name,email,phone,address,district,dni:clean(x.dni||'',20),deliveryReference:clean(x.deliveryReference||'',180),shipping:'free_included',idempotencyKey,requestHash,adminControlledTest:LIVE_ADMIN_TEST_ONLY};
+  const buyer={name,email,phone,address,district,dni:clean(x.dni||'',20),deliveryReference:clean(x.deliveryReference||'',180),shipping:'free_included',idempotencyKey,requestHash,adminControlledTest:adminPilot};
   // D1.batch es transaccional: el pedido y TODAS las reservas se crean o ninguno.
   const commands=[env.DB.prepare(`INSERT INTO izipay_live_orders
     (id,items_json,amount_cents,shipping_cents,currency,buyer_json,status,created_at,updated_at)
