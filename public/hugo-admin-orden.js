@@ -326,3 +326,84 @@
     overlay?.classList.toggle('hc-hg-contra-equal',fix);
   });
 })();
+
+
+/* Hugo Congas: imágenes fotográficas de categorías y acceso de clientes.
+   No altera funciones del administrador ni del catálogo. */
+(()=>{
+ 'use strict';
+ const photos={
+   congas:'percusion',bongo:'percusion',campana:'percusion',timbales:'percusion',percusion:'percusion',
+   guitar:'guitarras',guitars:'guitarras',acoustic:'guitarras',cuerdas:'guitarras',
+   bass:'bajos',bajos:'bajos',trumpet:'vientos',sax:'vientos',wind:'vientos',
+   keyboard:'teclados',piano:'teclados',keys:'teclados',mixer:'audio',mic:'audio',audio:'audio',
+   drums:'baterias',drum:'baterias',battery:'baterias',amp:'amplificadores',amplifier:'amplificadores',
+   case:'estuches',accessories:'estuches',stands:'estuches'
+ };
+ const findPhoto=(type)=>photos[String(type||'').toLowerCase()]||'estuches';
+ const picture=type=>{
+   const n=findPhoto(type);
+   return '<img class="hc-category-photo" src="/assets/categorias/'+n+'.webp" alt="Fotografía referencial de instrumentos" loading="lazy">';
+ };
+ const css=document.createElement('style');css.id='hc-category-photography';
+ css.textContent=`
+ .ds-cat__img-wrap,.dsp-mega__tile,.ds-big-cat__visual,.dsp-ls__img{isolation:isolate}
+ .ds-cat__img-wrap img.hc-category-photo,.dsp-mega__tile img.hc-category-photo,
+ .dsp-ls__img img.hc-category-photo,.ds-big-cat__visual img.hc-category-photo{
+   width:100%!important;height:100%!important;max-height:none!important;max-width:none!important;
+   display:block!important;object-fit:cover!important;mix-blend-mode:normal!important;filter:none!important;
+   border-radius:8px
+ }
+ .ds-cat__img-wrap img.hc-category-photo{object-position:center}
+ .dsp-mega__tile img.hc-category-photo{height:84px!important;border-radius:9px}
+ .ds-cat{overflow:hidden}
+ .ds-cat__img-wrap{overflow:hidden;border-radius:10px;background:#151515!important}
+ .ds-cat__img-wrap img.hc-category-photo{filter:contrast(1.03) saturate(1.05)!important}
+ .dsp-ls__img img.hc-category-photo{object-fit:contain!important}
+ `;document.head.appendChild(css);
+ // Los iconos de navegación (carrito, flechas, menú) siguen siendo iconos funcionales.
+ if(typeof window.getInstrumentSVG==='function'){window.getInstrumentSVG=picture}
+ // Respaldo: fotografías en elementos ya renderizados antes de este módulo.
+ function replaceDrawings(){
+   document.querySelectorAll('.ds-cat__img-wrap svg,.dsp-mega__tile svg,.ds-big-cat__visual svg').forEach(svg=>{
+     const el=svg.closest('.ds-cat,.dsp-mega__tile,.ds-big-cat');
+     const label=(el?.textContent||'').toLowerCase();
+     let type='estuches';
+     if(/percusi|conga|bong|campana|timbal/.test(label))type='congas';
+     else if(/guitarra|cuerda/.test(label))type='guitar';
+     else if(/bajo/.test(label))type='bass';
+     else if(/viento|metal|trompe|saxo/.test(label))type='trumpet';
+     else if(/piano|teclado/.test(label))type='keyboard';
+     else if(/audio|micr|consola/.test(label))type='mixer';
+     else if(/bater|plati/.test(label))type='drums';
+     else if(/amplifica/.test(label))type='amp';
+     const wrap=document.createElement('span');wrap.innerHTML=picture(type);svg.replaceWith(wrap.firstElementChild);
+   });
+ }
+ function useMatchingPhotos(){
+   const groups=[
+     [/bater[ií]a|platillo|parche/i,'baterias'],
+     [/amplificador|monitor de piso|combo|parlante/i,'amplificadores'],
+     [/estuche|soporte|funda|atril|cable/i,'estuches'],
+     [/guitarra|cuerdas y efectos/i,'guitarras'],
+     [/bajo/i,'bajos'],
+     [/viento|saxof[oó]n|trompeta|tromb[oó]n|boquilla/i,'vientos'],
+     [/piano|teclado|sintetizador/i,'teclados'],
+     [/audio|micr[oó]fono|consola|mezcladora|interfaz|inal[aá]mbrico/i,'audio'],
+     [/percusi[oó]n|conga|bong[oó]|campana|timbal/i,'percusion']
+   ];
+   document.querySelectorAll('#homeCategoriesGrid .ds-cat, #dspMegaGrid .dsp-mega__tile').forEach(el=>{
+     const title=(el.querySelector('h3')?.textContent||el.querySelector('span')?.textContent||el.textContent||'').trim();
+     const type=groups.find(([rx])=>rx.test(title))?.[1];
+     const img=el.querySelector('img.hc-category-photo');
+     if(type&&img)img.src='/assets/categorias/'+type+'.webp';
+   });
+ }
+ document.addEventListener('DOMContentLoaded',()=>{
+   replaceDrawings();useMatchingPhotos();
+   const mega=document.getElementById('dspMegaGrid');
+   if(mega)new MutationObserver(()=>{replaceDrawings();useMatchingPhotos()}).observe(mega,{childList:true});
+   setTimeout(()=>{replaceDrawings();useMatchingPhotos()},600);
+ }, {once:true});
+ const script=document.createElement('script');script.src='/hugo-cuentas-clientes.js';script.defer=true;document.head.appendChild(script);
+})();
