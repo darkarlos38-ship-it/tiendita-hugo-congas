@@ -92,7 +92,17 @@ function draw(){const root=getLightbox();root.querySelector('img').src=gallery[p
 function move(d){if(!gallery.length)return;pos=(pos+d+gallery.length)%gallery.length;draw()}
 function close(){const root=getLightbox();root.hidden=true;document.body.style.overflow=priorOverflow}
 function open(photos,i){gallery=[...new Set(photos.filter(Boolean))];if(!gallery.length)return;pos=Math.max(0,i)%gallery.length;priorOverflow=document.body.style.overflow;document.body.style.overflow='hidden';const root=getLightbox();root.hidden=false;draw();root.querySelector('.hc-close').focus()}
-function photoSet(){const title=document.querySelector('#hc-inline-detail .hc-detail-name')?.textContent;const p=(typeof PRODUCTS!=='undefined'?PRODUCTS:[]).find(q=>q.title===title);return p?[p.image,...(Array.isArray(p.gallery)?p.gallery:[])]:[]}
+
+function photoSet() {
+  const d = document.getElementById('hc-inline-detail');
+  const id = d?.querySelector('.hc-detail-image')?.dataset.hcProductId;
+  const items = typeof PRODUCTS !== 'undefined' ? PRODUCTS : [];
+  const title = d?.querySelector('.hc-detail-name')?.textContent;
+  const p = items.find(x => String(x.id) === id)
+         || items.find(x => x.title === title);
+  return p ? [p.image, ...(Array.isArray(p.gallery) ? p.gallery : [])] : [];
+}
+
 function setupGallery(){const legacy=document.getElementById('productSheetContent');if(legacy&&!legacy.dataset.hgLegacy){legacy.dataset.hgLegacy='1';legacy.addEventListener('click',e=>{const img=e.target.closest('.dsp-single-gallery img');if(!img)return;const title=legacy.querySelector('h2')?.textContent;const p=(typeof PRODUCTS!=='undefined'?PRODUCTS:[]).find(x=>x.title===title);const photos=p?[p.image,...(Array.isArray(p.gallery)?p.gallery:[])]:[img.src];open(photos,Math.max(0,photos.indexOf(img.getAttribute('src'))))})}const detail=document.getElementById('hc-inline-detail');if(!detail||detail.dataset.hgClick)return;detail.dataset.hgClick='1';detail.addEventListener('click',e=>{const el=e.target.closest('.hc-detail-image img');if(!el)return;const photos=photoSet();open(photos.length?photos:[el.src],Math.max(0,photos.indexOf(el.getAttribute('src'))))});
  document.addEventListener('keydown',e=>{const root=document.getElementById('hc-hg-lightbox');if(!root||root.hidden)return;if(e.key==='Escape')close();if(e.key==='ArrowRight')move(1);if(e.key==='ArrowLeft')move(-1)});
  // Añadir botones de navegación justo debajo de la foto principal.
