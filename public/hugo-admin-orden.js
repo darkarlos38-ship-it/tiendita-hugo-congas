@@ -460,3 +460,96 @@
  }, {once:true});
  const script=document.createElement('script');script.src='/hugo-cuentas-clientes.js';script.defer=true;document.head.appendChild(script);
 })();
+
+
+/* HUGO CONGAS | fondo de fotos de producto integrado con la imagen.
+ * Las fotos originales se conservan: no recorta instrumentos ni altera cargas o R2.
+ * Sólo afecta las superficies de imagen en tarjetas de productos.
+ * Para fotos claras uniformes, elimina el cuadro gris visible alrededor.
+ */
+(()=>{
+  'use strict';
+  if(document.getElementById('hc-product-photo-surface-style'))return;
+  const style=document.createElement('style');
+  style.id='hc-product-photo-surface-style';
+  style.textContent=`
+    .mas-product__thumb.hc-photo-edge-match,
+    .dsp-prod-card__thumb.hc-photo-edge-match{
+      background:var(--hc-photo-edge-bg,#fff)!important;
+      border-color:rgba(255,255,255,.13)!important;
+      padding:0!important;
+      overflow:hidden!important;
+      isolation:isolate;
+    }
+    .mas-product__thumb.hc-photo-edge-match img,
+    .dsp-prod-card__thumb.hc-photo-edge-match img{
+      display:block!important;
+      width:100%!important;
+      height:100%!important;
+      max-width:100%!important;
+      max-height:100%!important;
+      object-fit:contain!important;
+      object-position:center!important;
+      mix-blend-mode:normal!important;
+      background:transparent!important;
+      border:0!important;
+      box-shadow:none!important;
+    }
+    .mas-product__thumb.hc-photo-edge-match .mas-badge{
+      position:absolute!important;z-index:3!important;
+    }
+  `;
+  document.head.appendChild(style);
+  const selector='.mas-product__thumb img,.dsp-prod-card__thumb img';
+  const seen=new WeakSet();
+  function matchBackdrop(img){
+    if(!img.naturalWidth||!img.naturalHeight)return;
+    const surface=img.closest('.mas-product__thumb,.dsp-prod-card__thumb');
+    if(!surface)return;
+    try{
+      const canvas=document.createElement('canvas');
+      canvas.width=40;canvas.height=40;
+      const ctx=canvas.getContext('2d',{willReadFrequently:true});
+      if(!ctx)return;
+      ctx.drawImage(img,0,0,40,40);
+      const data=ctx.getImageData(0,0,40,40).data;
+      // Medir sólo las esquinas: no confundir el color del instrumento con el fondo.
+      const coords=[[1,1],[2,3],[37,1],[36,3],[1,37],[3,36],[37,37],[36,36]];
+      const px=coords.map(([x,y])=>{
+        const i=(y*40+x)*4;return [data[i],data[i+1],data[i+2]];
+      });
+      const rgb=[0,1,2].map(j=>Math.round(px.reduce((n,p)=>n+p[j],0)/px.length));
+      const bright=rgb.every(v=>v>=207);
+      const neutral=Math.max(...rgb)-Math.min(...rgb)<32;
+      const consistent=px.every(p=>p.every((v,j)=>Math.abs(v-rgb[j])<37));
+      // Sólo aplicar a fotografía clara (fondo blanco/gris muy claro), sin alterar fotos oscuras.
+      if(bright&&neutral&&consistent){
+        surface.classList.add('hc-photo-edge-match');
+        surface.style.setProperty('--hc-photo-edge-bg',`rgb(${rgb.join(',')})`);
+      }else{
+        surface.classList.remove('hc-photo-edge-match');
+        surface.style.removeProperty('--hc-photo-edge-bg');
+      }
+    }catch(err){
+      // Si la foto está alojada fuera del mismo dominio, no se intenta leer sus píxeles.
+      // Así evitamos cambios de color por una clasificación desconocida.
+    }
+  }
+  function scan(){
+    document.querySelectorAll(selector).forEach(img=>{
+      if(seen.has(img))return;
+      seen.add(img);
+      if(img.complete&&img.naturalWidth){matchBackdrop(img)}
+      else img.addEventListener('load',()=>matchBackdrop(img),{once:true});
+    });
+  }
+  function init(){
+    scan();
+    const roots=['carouselBestSellers','carouselNewArrivals','carouselProAudio','archiveProductsGrid'];
+    roots.forEach(id=>{
+      const el=document.getElementById(id);
+      if(el)new MutationObserver(scan).observe(el,{childList:true,subtree:true});
+    });
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+})();
