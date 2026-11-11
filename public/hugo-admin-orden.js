@@ -287,3 +287,42 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setup,{once:true});else setup();
 })();
+
+
+/* Ajuste exclusivo del visor ampliado de CONTRA CAMPANA en pantallas móviles.
+   El segundo archivo tiene menor resolución nativa: evitamos que se represente
+   a su tamaño original, usando la misma área de exhibición sin deformar.
+   No altera el catálogo, la galería de fichas, ni la versión de escritorio. */
+(()=>{
+  'use strict';
+  const style=document.createElement('style');
+  style.id='hc-contra-lightbox-mobile-equal';
+  style.textContent=`
+    @media screen and (max-width:767px){
+      #hc-hg-lightbox.hc-hg-contra-equal img{
+        width:100%!important;
+        height:100%!important;
+        min-width:0!important;
+        min-height:0!important;
+        max-width:100%!important;
+        max-height:100%!important;
+        object-fit:contain!important;
+        object-position:center!important;
+      }
+    }
+  `;
+  document.head.appendChild(style);
+  document.addEventListener('click',e=>{
+    const main=e.target.closest?.('#hc-inline-detail .hc-detail-image img');
+    if(!main)return;
+    const detail=document.getElementById('hc-inline-detail');
+    const title=(detail?.querySelector('.hc-detail-name')?.textContent||'').trim().toUpperCase();
+    const brand=(detail?.querySelector('.hc-detail-meta')?.textContent||'').toUpperCase();
+    const photos=detail?.querySelectorAll('.hc-gallery-thumbs button')?.length||0;
+    const fix=window.matchMedia('(max-width:767px)').matches &&
+      title==='CONTRA CAMPANA' && brand.includes('HUGO CONGAS') && photos===2;
+    // Se ejecuta después del clic que abre el visor, sin interceptar su navegación.
+    const overlay=document.getElementById('hc-hg-lightbox');
+    overlay?.classList.toggle('hc-hg-contra-equal',fix);
+  });
+})();
