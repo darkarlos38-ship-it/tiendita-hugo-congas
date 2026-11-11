@@ -797,6 +797,7 @@ export default {async fetch(req,env){
     return json({error:'El carrito debe contener de 1 a 20 productos'},400);
   const name=clean(x.name,120).trim(),email=clean(x.email,160).trim(),phone=clean(x.phone,30).trim(),
     address=clean(x.address,300).trim(),district=clean(x.district,100).trim();
+  if(!/^[A-Za-z0-9-]{7,20}$/.test(String(x.dni||'')))return json({error:'Ingresa un DNI o documento válido para realizar el envío'},400);
   if(name.length<3||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||
      !/^[+\d\s()-]{7,25}$/.test(phone)||address.length<5||district.length<2)
     return json({error:'Completa los datos de entrega'},400);
@@ -842,7 +843,7 @@ export default {async fetch(req,env){
   }
   const orderId='HC-LIVE-'+crypto.randomUUID(),now=new Date().toISOString(),
     expires=new Date(Date.now()+15*60*1000).toISOString();
-  const buyer={name,email,phone,address,district,shipping:'free_included',idempotencyKey,requestHash,adminControlledTest:LIVE_ADMIN_TEST_ONLY};
+  const buyer={name,email,phone,address,district,dni:clean(x.dni||'',20),deliveryReference:clean(x.deliveryReference||'',180),shipping:'free_included',idempotencyKey,requestHash,adminControlledTest:LIVE_ADMIN_TEST_ONLY};
   // D1.batch es transaccional: el pedido y TODAS las reservas se crean o ninguno.
   const commands=[env.DB.prepare(`INSERT INTO izipay_live_orders
     (id,items_json,amount_cents,shipping_cents,currency,buyer_json,status,created_at,updated_at)
@@ -993,6 +994,53 @@ export default {async fetch(req,env){
   await env.MEDIA_BUCKET.put(key,bytes,{httpMetadata:{contentType:photo.type}});
   return json({ok:true,url:'/media/'+key},201);
  }
+// Agregar ANTES del bloque: if(p==='/api/logout'&&method==='POST'){
+// Gestión logística independiente del estado de pago. Solo admin; no cobra ni altera stock.
+if(p==='/api/gestion/pedidos'&&method==='GET'){
+  if(!await auth(req,env))return json({error:'Acceso de administrador requerido'},401);
+  const r=await env.DB.prepare(`SELECT o.id,o.items_json,o.buyer_json,o.amount_cents,o.paid_at,
+    o.gateway_transaction_id,d.status AS delivery_status,d.shipping_reference
+    FROM izipay_live_orders o
+    LEFT JOIN hc_order_dispatch_v1 d ON d.order_id=o.id
+    WHERE o.status='PAID' AND o.paid_at IS NOT NULL AND o.currency='PEN'
+      AND EXISTS(SELECT 1 FROM izipay_live_webhook_events e
+        WHERE e.order_id=o.id AND e.verified=1 AND e.processing_status='GATE_CLOSED_PAID')
+      AND (SELECT COUNT(*) FROM hc_live_fulfillments f WHERE f.order_id=o.id)=json_array_length(o.items_json)
+      AND json_valid(o.items_json)=1 AND json_array_length(o.items_json)>0
+    ORDER BY o.paid_at DESC LIMIT 300`).all();
+  const orders=(r.results||[]).map(o=>{
+    let buyer={},items=[];
+    try{buyer=JSON.parse(o.buyer_json||'{}')}catch{}
+    try{items=JSON.parse(o.items_json||'[]')}catch{}
+    return {id:o.id,amountCents:o.amount_cents,paidAt:o.paid_at,
+      gatewayTransactionId:o.gateway_transaction_id||'',
+      paymentMethod:'Izipay (medio específico no informado)',
+      deliveryStatus:o.delivery_status||'PENDIENTE',
+      shippingReference:o.shipping_reference||'',buyer,items};
+  });
+  return json({orders});
+}
+if(/^\/api\/gestion\/pedidos\/HC-LIVE-[a-zA-Z0-9-]+$/.test(p)&&method==='PATCH'){
+  if(!await auth(req,env))return json({error:'Acceso de administrador requerido'},401);
+  const id=p.split('/').pop();
+  const input=await requestJson(req);
+  const status=String(input.status||'');
+  const shippingReference=clean(input.shippingReference||'',150).trim();
+  if(!['PENDIENTE','GESTIONADO','ENVIADO'].includes(status))return json({error:'Estado inválido'},400);
+  const result=await env.DB.prepare(`INSERT INTO hc_order_dispatch_v1(order_id,status,shipping_reference,updated_at)
+    SELECT o.id,?,?,? FROM izipay_live_orders o WHERE o.id=? AND o.status='PAID'
+      AND o.paid_at IS NOT NULL AND o.currency='PEN'
+      AND EXISTS(SELECT 1 FROM izipay_live_webhook_events e WHERE e.order_id=o.id
+        AND e.verified=1 AND e.processing_status='GATE_CLOSED_PAID')
+      AND json_valid(o.items_json)=1 AND json_array_length(o.items_json)>0
+      AND (SELECT COUNT(*) FROM hc_live_fulfillments f WHERE f.order_id=o.id)=json_array_length(o.items_json)
+    ON CONFLICT(order_id) DO UPDATE SET
+      status=excluded.status,shipping_reference=excluded.shipping_reference,updated_at=excluded.updated_at`)
+    .bind(status,shippingReference,new Date().toISOString(),id).run();
+  if(Number(result.meta?.changes)!==1)return json({error:'Pedido no pagado o sin validación completa'},409);
+  return json({ok:true,orderId:id,status,shippingReference});
+}
+
  if(p==='/api/logout'&&method==='POST'){
    await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await digest(cookie(req))).run();
    return json({ok:true},200,{'Set-Cookie':'hc_admin=; HttpOnly; SameSite=Strict; Secure; Path=/; Max-Age=0'});
