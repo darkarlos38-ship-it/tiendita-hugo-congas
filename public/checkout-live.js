@@ -37,7 +37,7 @@
   }catch(e){error(e.message);blocked.textContent='No fue posible iniciar el pago. Vuelve a la tienda.';btn.disabled=true}
  };
  async function fingerprint(data){
-  const canonical=JSON.stringify({items:data.items,name:data.name,email:data.email,phone:data.phone,address:data.address,district:data.district});
+  const canonical=JSON.stringify({items:data.items,name:data.name,email:data.email,phone:data.phone,address:data.address,district:data.district,dni:data.dni,deliveryReference:data.deliveryReference});
   const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonical));
   return Array.from(new Uint8Array(bytes)).map(b=>b.toString(16).padStart(2,'0')).join('');
  }
@@ -53,7 +53,7 @@
  $('checkout-form').addEventListener('submit',async e=>{
   e.preventDefault();if(!paymentAllowed||busy||!chosen.length)return;
   busy=true;btn.disabled=true;msg.textContent='Validando tu compra…';
-  const data={items:chosen.map(x=>({id:x.id,qty:x.qty})),name:$('name').value.trim(),email:$('email').value.trim(),phone:$('phone').value.trim(),address:$('address').value.trim(),district:$('district').value.trim()};
+  const data={items:chosen.map(x=>({id:x.id,qty:x.qty})),name:$('name').value.trim(),email:$('email').value.trim(),phone:$('phone').value.trim(),address:$('address').value.trim(),district:$('district').value.trim(),dni:$('dni').value.trim(),deliveryReference:$('deliveryReference').value.trim()};
   try{
     const hash=await fingerprint(data);
     let previous;try{previous=JSON.parse(sessionStorage.getItem(key)||'null')}catch{previous=null}

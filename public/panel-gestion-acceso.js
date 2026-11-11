@@ -8,7 +8,6 @@ const LINK='/panel-gestion.html';function attach(){const workspace=document.getE
   function setupHugoCheckout(){
     const button=document.getElementById('hc-checkout-test-button');
     if(!button || document.getElementById('hc-checkout-live-button'))return;
-    // Convertir el botón TEST existente en botón real, oculto hasta que el servidor lo permita.
     button.id='hc-checkout-live-button';
     button.setAttribute('onclick','hcCheckoutLive()');
     const label=button.querySelector('span');
@@ -22,3 +21,6 @@ const LINK='/panel-gestion.html';function attach(){const workspace=document.getE
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setupHugoCheckout,{once:true});
   else setupHugoCheckout();
 })();
+
+// Nuevas categorías y galería sin modificar el carrito ni las reglas de Izipay.
+(()=>{const s=document.createElement('script');s.src='/hugo-mejoras.js';s.defer=true;document.head.appendChild(s)})();
