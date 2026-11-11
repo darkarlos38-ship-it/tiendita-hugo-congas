@@ -1042,6 +1042,7 @@ if(/^\/api\/gestion\/pedidos\/HC-LIVE-[a-zA-Z0-9-]+$/.test(p)&&method==='PATCH')
 }
 
  if (p === '/api/catalog-order' && method === 'PUT') {
+  // Reordenar únicamente la presentación; no modifica productos ni existencias.
   const payload = await requestJson(req);
   const values = payload?.ids;
   if (!Array.isArray(values) || values.length > 3000 ||
@@ -1052,23 +1053,34 @@ if(/^\/api\/gestion\/pedidos\/HC-LIVE-[a-zA-Z0-9-]+$/.test(p)&&method==='PATCH')
   }
   const ids = values.map(String);
   if (new Set(ids).size !== ids.length) return json({error:'ID de instrumento repetido'},400);
-  const row = await env.DB.prepare("SELECT value FROM appdata WHERE key='catalog'").first();
-  if (!row) return json({error:'Catálogo no inicializado'},409);
-  const db = JSON.parse(row.value);
-  const real = new Set((db.products||[]).map(x=>String(x.id)));
-  const received = new Set(ids);
-  if ([...real].some(id=>!received.has(id)) || ids.some(id=>Number(id)>0&&!real.has(id))) {
-    return json({error:'El inventario cambió. Recarga la tienda antes de ordenar.'},409);
+
+  // D1 puede atender lecturas desde distintas versiones. Una sesión iniciada en
+  // primary ofrece la versión más reciente; el UPDATE condicional evita sobrescribir
+  // ediciones concurrentes. Si otro administrador actualizó el catálogo, se revalida.
+  for (let attempt=0; attempt<3; attempt++) {
+    const db = typeof env.DB.withSession === 'function'
+      ? env.DB.withSession('first-primary') : env.DB;
+    const row = await db.prepare("SELECT value FROM appdata WHERE key='catalog'").first();
+    if (!row) return json({error:'Catálogo no inicializado'},409);
+    const catalog = JSON.parse(row.value);
+    const real = new Set((catalog.products||[]).map(x=>String(x.id)));
+    const received = new Set(ids);
+    if ([...real].some(id=>!received.has(id)) || ids.some(id=>Number(id)>0&&!real.has(id))) {
+      return json({error:'El inventario cambió. Recarga la tienda antes de ordenar.'},409);
+    }
+    catalog.settings ??= {};
+    if (Array.isArray(catalog.settings.displayOrder) &&
+        catalog.settings.displayOrder.length===ids.length &&
+        catalog.settings.displayOrder.every((id,i)=>String(id)===ids[i])) {
+      return json({ok:true,ids,alreadySaved:true});
+    }
+    catalog.settings.displayOrder=ids;
+    const result=await db.prepare(
+      "UPDATE appdata SET value=? WHERE key='catalog' AND value=?"
+    ).bind(JSON.stringify(catalog),row.value).run();
+    if (Number(result.meta?.changes)===1) return json({ok:true,ids});
   }
-  db.settings ??= {};
-  db.settings.displayOrder = ids;
-  const result = await env.DB.prepare(
-    "UPDATE appdata SET value=? WHERE key='catalog' AND value=?"
-  ).bind(JSON.stringify(db),row.value).run();
-  if (Number(result.meta?.changes)!==1) {
-    return json({error:'Otro cambio del catálogo ocurrió a la vez. Recarga y reintenta.'},409);
-  }
-  return json({ok:true,ids});
+  return json({error:'El catálogo cambió durante el guardado. Recarga y vuelve a intentar.'},409);
 }
  if(p==='/api/logout'&&method==='POST'){
    await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await digest(cookie(req))).run();
