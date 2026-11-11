@@ -204,3 +204,86 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setup,{once:true});else setup();
 })();
+
+
+/* HUGO CONGAS / SOLO CELULAR (max-width: 767px)
+   Filtros plegables y tamaño constante del visor de fotos.
+   No altera lógica de producto, admin, catálogo, pagos ni escritorio. */
+(()=>{
+  'use strict';
+  if(document.getElementById('hc-mobile-ui-style'))return;
+  const style=document.createElement('style');
+  style.id='hc-mobile-ui-style';
+  style.textContent=`
+  .hc-mobile-filters-toggle{display:none}
+  @media screen and (max-width:767px){
+    body.hc-catalog-mode .dsp-archive-wrap{padding:16px 12px 25px!important;min-width:0!important}
+    body.hc-catalog-mode .dsp-cat-head{margin-bottom:12px!important;padding-bottom:12px!important}
+    body.hc-catalog-mode .dsp-cat-title h2{font-size:clamp(21px,5.3vw,25px)!important;line-height:1.2!important}
+    body.hc-catalog-mode .dsp-cat-title span{font-size:12px!important;white-space:normal!important}
+    body.hc-catalog-mode .dsp-chips{display:flex!important;flex-wrap:nowrap!important;overflow-x:auto!important;overflow-y:hidden!important;gap:7px!important;margin-top:12px!important;padding:0 1px 8px!important;-webkit-overflow-scrolling:touch;scrollbar-width:thin;max-width:100%!important}
+    body.hc-catalog-mode .dsp-chips .dsp-chip{flex:0 0 auto!important;width:auto!important;min-width:0!important;height:39px!important;padding:0 12px!important;border-radius:23px!important;font-size:13px!important;line-height:1.1!important;white-space:nowrap!important}
+    body.hc-catalog-mode .dsp-chips .dsp-chip small{font-size:11px!important}
+    body.hc-catalog-mode .dsp-shop-layout{display:block!important;min-width:0!important}
+    body.hc-catalog-mode .hc-mobile-filters-toggle{display:flex!important;align-items:center;justify-content:space-between;width:100%;padding:12px 14px!important;margin:4px 0 14px!important;border:1px solid #655422!important;border-radius:11px!important;background:#191919!important;color:#f4cd55!important;font:700 14px/1.3 Arial,sans-serif!important;text-align:left;cursor:pointer}
+    body.hc-catalog-mode .hc-mobile-filters-toggle .hc-mf-arrow{font-size:16px;transition:transform .2s}
+    body.hc-catalog-mode.hc-mobile-filters-open .hc-mobile-filters-toggle .hc-mf-arrow{transform:rotate(180deg)}
+    body.hc-catalog-mode:not(.hc-mobile-filters-open) .dsp-filters{display:none!important}
+    body.hc-catalog-mode.hc-mobile-filters-open .dsp-filters{position:static!important;top:auto!important;display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:9px!important;padding:0!important;margin:0 0 15px!important;min-width:0!important}
+    body.hc-catalog-mode.hc-mobile-filters-open .dsp-filters>.dsp-f{padding:12px!important;border:1px solid #3b3b3b!important;border-radius:10px!important;min-width:0!important}
+    body.hc-catalog-mode.hc-mobile-filters-open .dsp-filters>.dsp-f .dsp-f-title{font-size:15px!important;margin-bottom:8px!important}
+    body.hc-catalog-mode.hc-mobile-filters-open #sidebarCatList{max-height:265px!important;overflow-y:auto!important;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+    body.hc-catalog-mode.hc-mobile-filters-open #sidebarBrandList{max-height:180px!important;overflow-y:auto!important;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+    body.hc-catalog-mode.hc-mobile-filters-open .dsp-filters>.dsp-help{display:none!important}
+    body.hc-catalog-mode.hc-mobile-filters-open .dsp-filters>.dsp-f li button{font-size:13px!important;min-height:30px!important}
+    body.hc-product-mode .dsp-cat-head,
+    body.hc-product-mode .hc-mobile-filters-toggle,
+    body.hc-product-mode .dsp-filters,
+    body.hc-product-mode #hc-hg-categories,
+    body.hc-product-mode .shop-control-bar,
+    body.hc-product-mode #archiveProductsGrid{display:none!important}
+    body.hc-product-mode #hc-inline-detail{margin-top:0!important}
+    body.hc-product-mode #hc-inline-detail .hc-detail-grid{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:16px!important}
+    #hc-inline-detail .hc-gallery-customer{width:100%!important;max-width:100%!important;min-width:0!important}
+    #hc-inline-detail .hc-gallery-customer .hc-detail-image,
+    #hc-inline-detail .hc-detail-image{width:100%!important;max-width:100%!important;min-width:0!important;height:clamp(285px,85vw,385px)!important;min-height:0!important;max-height:none!important;box-sizing:border-box!important;padding:12px!important;display:flex!important;justify-content:center!important;align-items:center!important;overflow:hidden!important}
+    #hc-inline-detail .hc-detail-image>img{display:block!important;width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;object-fit:contain!important;object-position:center!important;flex:0 0 auto!important}
+    #hc-inline-detail .hc-gallery-thumbs{display:flex!important;flex-wrap:nowrap!important;gap:8px!important;overflow-x:auto!important;max-width:100%!important}
+    #hc-inline-detail .hc-gallery-thumbs button{flex:0 0 60px!important;width:60px!important;height:60px!important}
+    #hc-inline-detail .hc-gallery-thumbs img{width:100%!important;height:100%!important;object-fit:contain!important}
+  }
+  `;
+  document.head.appendChild(style);
+  function setup(){
+    const layout=document.querySelector('#catalogo .dsp-shop-layout')||document.querySelector('.dsp-shop-layout');
+    const filter=layout?.querySelector('.dsp-filters');
+    if(!layout||!filter||document.getElementById('hc-mobile-filters-toggle'))return;
+    const button=document.createElement('button');
+    button.type='button';
+    button.id='hc-mobile-filters-toggle';
+    button.className='hc-mobile-filters-toggle';
+    button.setAttribute('aria-controls','hc-mobile-filter-group');
+    button.setAttribute('aria-expanded','false');
+    button.innerHTML='<span>☰ Filtros y subcategorías</span><span class="hc-mf-arrow" aria-hidden="true">⌄</span>';
+    filter.id='hc-mobile-filter-group';
+    filter.parentNode.insertBefore(button,filter);
+    button.addEventListener('click',()=>{
+      const open=!document.body.classList.contains('hc-mobile-filters-open');
+      document.body.classList.toggle('hc-mobile-filters-open',open);
+      button.setAttribute('aria-expanded',String(open));
+    });
+    // Al elegir una categoría o subcategoría, se libera espacio para ver los instrumentos.
+    filter.addEventListener('click',e=>{
+      if(!e.target.closest('#sidebarCatList button,#sidebarBrandList button'))return;
+      if(!window.matchMedia('(max-width:767px)').matches)return;
+      document.body.classList.remove('hc-mobile-filters-open');
+      button.setAttribute('aria-expanded','false');
+    });
+    document.querySelector('#archiveChips')?.addEventListener('click',()=>{
+      if(!window.matchMedia('(max-width:767px)').matches)return;
+      document.body.classList.remove('hc-mobile-filters-open');
+      button.setAttribute('aria-expanded','false');
+    });
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setup,{once:true});else setup();
+})();
