@@ -462,94 +462,132 @@
 })();
 
 
-/* HUGO CONGAS | fondo de fotos de producto integrado con la imagen.
- * Las fotos originales se conservan: no recorta instrumentos ni altera cargas o R2.
- * Sólo afecta las superficies de imagen en tarjetas de productos.
- * Para fotos claras uniformes, elimina el cuadro gris visible alrededor.
+/* HUGO CONGAS | Fotos integradas en carruseles y catálogo (v2).
+ * Uniforma MÁS VENDIDOS, NOVEDADES y AUDIO PROFESIONAL:
+ * - Las imágenes mantienen su proporción original (sin cortes).
+ * - El fondo de cada tarjeta se extiende con la misma fotografía desenfocada;
+ *   los originales claros conservan su luminosidad, y los de estudio se funden
+ *   con el fondo oscuro sin los antiguos marcos grises.
+ * - No modifica imágenes R2, precios, productos, carrito, login ni Izipay.
+ * - Compatible con fotos de otro dominio: no usa lectura de píxeles/canvas.
  */
 (()=>{
-  'use strict';
-  if(document.getElementById('hc-product-photo-surface-style'))return;
-  const style=document.createElement('style');
-  style.id='hc-product-photo-surface-style';
-  style.textContent=`
-    .mas-product__thumb.hc-photo-edge-match,
-    .dsp-prod-card__thumb.hc-photo-edge-match{
-      background:var(--hc-photo-edge-bg,#fff)!important;
-      border-color:rgba(255,255,255,.13)!important;
-      padding:0!important;
-      overflow:hidden!important;
-      isolation:isolate;
-    }
-    .mas-product__thumb.hc-photo-edge-match img,
-    .dsp-prod-card__thumb.hc-photo-edge-match img{
-      display:block!important;
-      width:100%!important;
-      height:100%!important;
-      max-width:100%!important;
-      max-height:100%!important;
-      object-fit:contain!important;
-      object-position:center!important;
-      mix-blend-mode:normal!important;
-      background:transparent!important;
-      border:0!important;
-      box-shadow:none!important;
-    }
-    .mas-product__thumb.hc-photo-edge-match .mas-badge{
-      position:absolute!important;z-index:3!important;
-    }
-  `;
-  document.head.appendChild(style);
-  const selector='.mas-product__thumb img,.dsp-prod-card__thumb img';
-  const seen=new WeakSet();
-  function matchBackdrop(img){
-    if(!img.naturalWidth||!img.naturalHeight)return;
-    const surface=img.closest('.mas-product__thumb,.dsp-prod-card__thumb');
-    if(!surface)return;
-    try{
-      const canvas=document.createElement('canvas');
-      canvas.width=40;canvas.height=40;
-      const ctx=canvas.getContext('2d',{willReadFrequently:true});
-      if(!ctx)return;
-      ctx.drawImage(img,0,0,40,40);
-      const data=ctx.getImageData(0,0,40,40).data;
-      // Medir sólo las esquinas: no confundir el color del instrumento con el fondo.
-      const coords=[[1,1],[2,3],[37,1],[36,3],[1,37],[3,36],[37,37],[36,36]];
-      const px=coords.map(([x,y])=>{
-        const i=(y*40+x)*4;return [data[i],data[i+1],data[i+2]];
-      });
-      const rgb=[0,1,2].map(j=>Math.round(px.reduce((n,p)=>n+p[j],0)/px.length));
-      const bright=rgb.every(v=>v>=207);
-      const neutral=Math.max(...rgb)-Math.min(...rgb)<32;
-      const consistent=px.every(p=>p.every((v,j)=>Math.abs(v-rgb[j])<37));
-      // Sólo aplicar a fotografía clara (fondo blanco/gris muy claro), sin alterar fotos oscuras.
-      if(bright&&neutral&&consistent){
-        surface.classList.add('hc-photo-edge-match');
-        surface.style.setProperty('--hc-photo-edge-bg',`rgb(${rgb.join(',')})`);
-      }else{
-        surface.classList.remove('hc-photo-edge-match');
-        surface.style.removeProperty('--hc-photo-edge-bg');
-      }
-    }catch(err){
-      // Si la foto está alojada fuera del mismo dominio, no se intenta leer sus píxeles.
-      // Así evitamos cambios de color por una clasificación desconocida.
-    }
+ 'use strict';
+ const STYLE_ID='hc-product-photo-immersive-v2';
+ if(document.getElementById(STYLE_ID))return;
+ const style=document.createElement('style');
+ style.id=STYLE_ID;
+ style.textContent=`
+  /* Las tres secciones del home y las tarjetas de catálogo comparten el acabado. */
+  .mas-product__thumb.hc-product-photo-immersive,
+  .dsp-prod-card__thumb.hc-product-photo-immersive{
+    position:relative!important;
+    overflow:hidden!important;
+    padding:0!important;
+    isolation:isolate!important;
+    background:#141414!important;
+    border-color:rgba(255,255,255,.10)!important;
   }
-  function scan(){
-    document.querySelectorAll(selector).forEach(img=>{
-      if(seen.has(img))return;
-      seen.add(img);
-      if(img.complete&&img.naturalWidth){matchBackdrop(img)}
-      else img.addEventListener('load',()=>matchBackdrop(img),{once:true});
-    });
+  .mas-product__thumb.hc-product-photo-immersive::before,
+  .dsp-prod-card__thumb.hc-product-photo-immersive::before{
+    content:"";
+    position:absolute;
+    inset:-30px;
+    z-index:0;
+    pointer-events:none;
+    background-image:var(--hc-photo-immersive-url,none);
+    background-size:cover;
+    background-position:center;
+    background-repeat:no-repeat;
+    filter:blur(24px) saturate(.90);
+    transform:scale(1.08);
   }
-  function init(){
-    scan();
-    const roots=['carouselBestSellers','carouselNewArrivals','carouselProAudio','archiveProductsGrid'];
-    roots.forEach(id=>{
-      const el=document.getElementById(id);
-      if(el)new MutationObserver(scan).observe(el,{childList:true,subtree:true});
-    });
+  .mas-product__thumb.hc-product-photo-immersive::after,
+  .dsp-prod-card__thumb.hc-product-photo-immersive::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    z-index:0;
+    pointer-events:none;
+    background:linear-gradient(180deg,rgba(0,0,0,.08),transparent 27%,transparent 73%,rgba(0,0,0,.08));
   }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+  .mas-product__thumb.hc-product-photo-immersive > img,
+  .dsp-prod-card__thumb.hc-product-photo-immersive > img{
+    display:block!important;
+    position:relative!important;
+    z-index:1!important;
+    width:100%!important;
+    height:100%!important;
+    max-width:100%!important;
+    max-height:100%!important;
+    object-fit:contain!important;
+    object-position:center!important;
+    padding:0!important;
+    margin:0!important;
+    background:transparent!important;
+    border:0!important;
+    border-radius:0!important;
+    box-shadow:none!important;
+    mix-blend-mode:normal!important;
+  }
+  /* Fotos de categoría oscuras: fundir los límites rectos con la extensión. */
+  .mas-product__thumb.hc-product-photo-immersive > img.hc-category-photo,
+  .dsp-prod-card__thumb.hc-product-photo-immersive > img.hc-category-photo{
+    -webkit-mask-image:radial-gradient(ellipse 72% 78% at center,#000 56%,transparent 100%);
+    mask-image:radial-gradient(ellipse 72% 78% at center,#000 56%,transparent 100%);
+  }
+  /* El badge permanece sobre la fotografía y los botones no se alteran. */
+  .mas-product__thumb.hc-product-photo-immersive .mas-badge{
+    position:absolute!important;
+    z-index:3!important;
+  }
+  @media (prefers-reduced-motion:reduce){
+    .mas-product__thumb.hc-product-photo-immersive,
+    .dsp-prod-card__thumb.hc-product-photo-immersive{transition:none!important}
+  }
+ `;
+ document.head.appendChild(style);
+ const SELECTOR='.mas-product__thumb > img, .dsp-prod-card__thumb > img';
+ const watched=new WeakSet();
+ const processed=new WeakMap();
+ function normalize(img){
+   const surface=img.parentElement;
+   if(!surface||!(surface.matches('.mas-product__thumb,.dsp-prod-card__thumb')))return;
+   const src=img.currentSrc||img.src||'';
+   if(!src)return;
+   if(processed.get(img)===src&&surface.classList.contains('hc-product-photo-immersive'))return;
+   processed.set(img,src);
+   // JSON.stringify escapa las comillas de URLs y evita romper el valor de CSS.
+   surface.style.setProperty('--hc-photo-immersive-url','url('+JSON.stringify(src)+')');
+   surface.classList.add('hc-product-photo-immersive');
+   // El módulo anterior podría haber dejado un color inline, que ya no aplica.
+   surface.classList.remove('hc-photo-edge-match');
+   surface.style.removeProperty('--hc-photo-edge-bg');
+ }
+ function scan(){
+   document.querySelectorAll(SELECTOR).forEach(img=>{
+     if(!watched.has(img)){
+       watched.add(img);
+       img.addEventListener('load',()=>normalize(img));
+     }
+     normalize(img);
+   });
+ }
+ function init(){
+   scan();
+   let queued=false;
+   const schedule=()=>{
+     if(queued)return;
+     queued=true;
+     requestAnimationFrame(()=>{queued=false;scan()});
+   };
+   for(const id of ['carouselBestSellers','carouselNewArrivals','carouselProAudio','archiveProductsGrid']){
+     const root=document.getElementById(id);
+     if(root)new MutationObserver(schedule).observe(root,{
+       childList:true,subtree:true,attributes:true,attributeFilter:['src','srcset']
+     });
+   }
+ }
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});
+ else init();
 })();
