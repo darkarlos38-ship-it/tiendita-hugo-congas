@@ -553,3 +553,126 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
+
+
+/* HUGO CONGAS | Carátulas limpias sin franjas ni fondo duplicado.
+   Complementa la detección existente de imágenes claras.
+   Para fotos oscuras se utiliza un fondo neutro que se funde con la imagen.
+   No se cambia la relación de aspecto ni el archivo original.
+*/
+(()=>{
+ 'use strict';
+ const STYLE='hc-clean-product-photo-stage-v3';
+ if(document.getElementById(STYLE))return;
+ const css=document.createElement('style');
+ css.id=STYLE;
+ css.textContent=`
+   /* Solo se ajusta el escenario donde se muestra la foto; no se tocan las fichas. */
+   .mas-product__thumb.hc-photo-dark-stage,
+   .dsp-prod-card__thumb.hc-photo-dark-stage{
+     position:relative!important;
+     overflow:hidden!important;
+     padding:0!important;
+     isolation:isolate!important;
+     background:#11100f!important;
+     border-color:rgba(255,255,255,.12)!important;
+   }
+   .mas-product__thumb.hc-photo-dark-stage > img,
+   .dsp-prod-card__thumb.hc-photo-dark-stage > img{
+     display:block!important;
+     position:relative!important;
+     z-index:1!important;
+     width:100%!important;
+     height:100%!important;
+     max-width:100%!important;
+     max-height:100%!important;
+     padding:0!important;
+     margin:0!important;
+     object-fit:contain!important;
+     object-position:center!important;
+     mix-blend-mode:normal!important;
+     background:transparent!important;
+     border:none!important;
+     box-shadow:none!important;
+   }
+   /* Las fotos horizontales de estudio se funden por sus bordes superior e inferior. */
+   .mas-product__thumb.hc-photo-dark-landscape > img,
+   .dsp-prod-card__thumb.hc-photo-dark-landscape > img{
+     position:absolute!important;
+     left:0!important;
+     top:50%!important;
+     right:auto!important;
+     bottom:auto!important;
+     transform:translateY(-50%)!important;
+     width:100%!important;
+     height:auto!important;
+     max-height:100%!important;
+     object-fit:contain!important;
+     -webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 14%,#000 83%,transparent 100%);
+     mask-image:linear-gradient(180deg,transparent 0%,#000 14%,#000 83%,transparent 100%);
+   }
+   .mas-product__thumb.hc-photo-dark-stage .mas-badge{
+     position:absolute!important;
+     z-index:3!important;
+   }
+ `;
+ document.head.appendChild(css);
+ const selector='.mas-product__thumb > img, .dsp-prod-card__thumb > img';
+ const watched=new WeakSet();
+ const imageState=new WeakMap();
+ function classify(img){
+   const stage=img.parentElement;
+   if(!stage||!stage.matches('.mas-product__thumb,.dsp-prod-card__thumb'))return;
+   const src=img.currentSrc||img.src||'';
+   if(!src||!img.complete||!img.naturalWidth)return;
+   if(imageState.get(img)===src)return;
+   imageState.set(img,src);
+   let light=stage.classList.contains('hc-photo-edge-match');
+   try{
+     const c=document.createElement('canvas'); c.width=24;c.height=24;
+     const ctx=c.getContext('2d',{willReadFrequently:true});
+     if(ctx){
+       ctx.drawImage(img,0,0,24,24);
+       const d=ctx.getImageData(0,0,24,24).data;
+       const coords=[[1,1],[22,1],[1,22],[22,22]];
+       const values=coords.map(([x,y])=>{let i=(y*24+x)*4;return[d[i],d[i+1],d[i+2]]});
+       const rgb=[0,1,2].map(j=>values.reduce((s,p)=>s+p[j],0)/values.length);
+       light=rgb.every(v=>v>=201)&&Math.max(...rgb)-Math.min(...rgb)<35&&
+             values.every(p=>p.every((v,j)=>Math.abs(v-rgb[j])<46));
+     }
+   }catch(_){ /* Las imágenes de otra procedencia conservan su estilo actual. */ }
+   if(light){
+     stage.classList.remove('hc-photo-dark-stage','hc-photo-dark-landscape');
+     return;
+   }
+   stage.classList.remove('hc-photo-edge-match');
+   stage.style.removeProperty('--hc-photo-edge-bg');
+   stage.classList.add('hc-photo-dark-stage');
+   stage.classList.toggle('hc-photo-dark-landscape',img.naturalWidth/img.naturalHeight>=1.2);
+ }
+ function scan(){
+   document.querySelectorAll(selector).forEach(img=>{
+     if(!watched.has(img)){
+       watched.add(img);
+       img.addEventListener('load',()=>{imageState.delete(img);classify(img)});
+     }
+     classify(img);
+   });
+ }
+ function init(){
+   scan();
+   let pending=false;
+   const schedule=()=>{
+     if(pending)return;
+     pending=true;
+     requestAnimationFrame(()=>{pending=false;scan()});
+   };
+   ['carouselBestSellers','carouselNewArrivals','carouselProAudio','archiveProductsGrid']
+     .forEach(id=>{
+       const root=document.getElementById(id);
+       if(root)new MutationObserver(schedule).observe(root,{childList:true,subtree:true,attributes:true,attributeFilter:['src','srcset']});
+     });
+ }
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});
+ else init();
+})();
