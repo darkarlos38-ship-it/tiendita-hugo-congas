@@ -33,6 +33,8 @@ const LINK='/panel-gestion.html';function attach(){const workspace=document.getE
   teclados:['Pianos digitales','Teclados','Sintetizadores','Controladores MIDI','Pedales y soportes','Otros teclados'],
   audio:['Micrófonos','Micrófonos inalámbricos','Consolas y mezcladoras','Interfaces de audio','Parlantes activos','Parlantes pasivos','Monitores','Cables y conectores','Soportes para micrófonos','Otros de audio']
  };
+ // Orden alfabético (español) para el panel lateral, sin modificar el catálogo.
+ for(const subcats of Object.values(GROUPS)) subcats.sort((a,b)=>a.localeCompare(b,'es-PE',{sensitivity:'base'}));
  const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
  const isContra=p=>p?.category==='percusion'&&/\bcontra\s*campanas?\b/.test(norm(p.title)+' '+norm(p.catLabel));
  const isChaCha=p=>p?.category==='percusion'&&/\bcha[\s-]*chas?\b/i.test(String(p.title||''));

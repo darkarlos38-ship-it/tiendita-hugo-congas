@@ -8,6 +8,8 @@ const SUB={
  bajos:['Bajos eléctricos','Bajos acústicos','Amplificadores','Cuerdas para bajo','Accesorios para bajo'],
  teclados:['Pianos digitales','Teclados','Sintetizadores','Controladores MIDI','Pedales y soportes','Otros teclados']
 };
+// Orden alfabético (español) de subcategorías, sin cambiar productos ni etiquetas guardadas.
+for(const subcats of Object.values(SUB)) subcats.sort((a,b)=>a.localeCompare(b,'es-PE',{sensitivity:'base'}));
 const CAT={percusion:'Percusión Latina',audio:'Audio Profesional',vientos:'Vientos',cuerdas:'Guitarras y Cuerdas',bajos:'Bajos',teclados:'Teclados'};
 const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 const leaf=p=>String(p?.catLabel||'').split(',').pop().trim();
