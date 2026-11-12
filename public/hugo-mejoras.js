@@ -1,7 +1,7 @@
 /* Hugo Congas – categorías y visor; no altera stock ni pagos */
 (()=>{'use strict';
 const SUB={
- percusion:['Campanas','Contracampanas','Timbales','Congas','Bongós','Maracas','Baquetas','Platillos','Parantes','Clamps','Herrajes metálicos','Accesorios metálicos','Cencerros','Parches','Baterías','Otros de percusión'],
+ percusion:['Campanas','Contracampanas','Cha-Cha','Timbales','Congas','Bongós','Maracas','Baquetas','Platillos','Parantes','Clamps','Accesorios de batucada','Accesorios metálicos','Cencerro','Parches','Baterías','Otros de percusión'],
  audio:['Micrófonos','Micrófonos inalámbricos','Consolas y mezcladoras','Interfaces de audio','Parlantes activos','Parlantes pasivos','Monitores','Cables y conectores','Soportes para micrófonos','Otros de audio'],
  vientos:['Trompetas','Trombones','Saxofones','Flautas','Boquillas','Otros de vientos'],
  cuerdas:['Guitarras acústicas','Guitarras eléctricas','Guitarras electroacústicas','Cuerdas','Accesorios y soportes','Otros de cuerdas'],
@@ -14,10 +14,21 @@ const leaf=p=>String(p?.catLabel||'').split(',').pop().trim();
 // Los títulos antiguos pueden decir CONTRA-CAMPANA o CONTRACAMPANA aunque
 // se hayan subido con una etiqueta genérica. Se clasifican correctamente al mostrar.
 const isContraCampana=p=>p?.category==='percusion'&&/\bcontra\s*campanas?\b/.test(norm(p.title));
-const leafFor=p=>isContraCampana(p)?'Contracampanas':leaf(p);
+// Cha-Cha SOLO para títulos con chacha/cha-cha/cha cha (y plurales).
+const isChaCha=p=>p?.category==='percusion'&&/\bcha[\s-]*chas?\b/i.test(String(p.title||''));
+const leafFor=p=>{
+ if(isChaCha(p))return 'Cha-Cha';
+ if(isContraCampana(p))return 'Contracampanas';
+ const v=leaf(p),n=norm(v);
+ if(n==='herrajes metalicos')return 'Accesorios de batucada';
+ if(n==='cencerros')return 'Cencerro';
+ return v;
+};
 const subMatches=(p,sub)=>{
  const wanted=norm(sub),label=norm(leafFor(p)),title=norm(p.title);
  if(!wanted)return true;
+ // Un Cha-Cha no debe aparecer mezclado con Campanas, Contracampanas u otros.
+ if(isChaCha(p))return wanted==='cha cha';
  if(p?.category==='percusion'&&(wanted==='campanas'||wanted==='contracampanas')){
    if(isContraCampana(p))return wanted==='contracampanas';
    if(wanted==='contracampanas')return /\bcontra\s*campanas?\b/.test(title)||/\bcontra\s*campanas?\b/.test(label);
@@ -27,7 +38,12 @@ const subMatches=(p,sub)=>{
 };
 function classifyExisting(){
  if(typeof PRODUCTS==='undefined'||!Array.isArray(PRODUCTS))return;
- for(const p of PRODUCTS)if(isContraCampana(p))p.catLabel='Percusión Latina, Contracampanas';
+ for(const p of PRODUCTS){
+   if(isChaCha(p))p.catLabel='Percusión Latina, Cha-Cha';
+   else if(isContraCampana(p))p.catLabel='Percusión Latina, Contracampanas';
+   else if(p?.category==='percusion'&&norm(leaf(p))==='herrajes metalicos')p.catLabel='Percusión Latina, Accesorios de batucada';
+   else if(p?.category==='percusion'&&norm(leaf(p))==='cencerros')p.catLabel='Percusión Latina, Cencerro';
+ }
 }
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&quot;'}[c]));
@@ -58,15 +74,22 @@ const style=document.createElement('style');style.textContent=css;document.head.
 function setupAdmin(){const form=document.getElementById('hc-product-form');if(!form||form.dataset.hgSubcat)return;form.dataset.hgSubcat='1';const category=form.elements.namedItem('category'),old=form.elements.namedItem('catLabel');if(!category||!old)return;const latin=category.querySelector('option[value=percusion]');if(latin)latin.textContent='Percusión Latina';
  const sel=document.createElement('select');sel.name='catLabel';sel.required=true;sel.id='hc-hg-subcategory';sel.style.cssText='width:100%;min-height:40px;background:#222;color:white';old.replaceWith(sel);
  const lab=sel.closest('label');if(lab)lab.childNodes[0].textContent='Subcategoría donde aparecerá el producto ';
- const rebuild=value=>{const current=String(value??sel.value??'');const prefix=CAT[category.value]||category.value;const values=(SUB[category.value]||['General']).map(x=>prefix+', '+x);if(current&&!values.some(v=>norm(v)===norm(current)))values.unshift(current);sel.replaceChildren(new Option('Selecciona subcategoría',''));values.forEach(v=>sel.add(new Option(v.split(',').slice(-1)[0].trim(),v)));sel.value=values.find(v=>norm(v)===norm(current))||'';};
+ const rebuild=value=>{let current=String(value??sel.value??'');const prefix=CAT[category.value]||category.value;
+  if(category.value==='percusion'){
+   const n=norm(current.split(',').pop());
+   if(n==='herrajes metalicos')current='Percusión Latina, Accesorios de batucada';
+   if(n==='cencerros')current='Percusión Latina, Cencerro';
+  }const values=(SUB[category.value]||['General']).map(x=>prefix+', '+x);if(current&&!values.some(v=>norm(v)===norm(current)))values.unshift(current);sel.replaceChildren(new Option('Selecciona subcategoría',''));values.forEach(v=>sel.add(new Option(v.split(',').slice(-1)[0].trim(),v)));sel.value=values.find(v=>norm(v)===norm(current))||'';};
  category.addEventListener('change',()=>rebuild(''));rebuild(old.value);
  form.addEventListener('click',e=>{if(e.target?.closest?.('#hc-save-product'))return;},true);
  const list=document.getElementById('hc-item-list');if(list){list.addEventListener('click',e=>{if(e.target.closest('[data-edit]')){const id=Number(e.target.closest('[data-edit]').dataset.edit);queueMicrotask(()=>{const p=(typeof PRODUCTS!=='undefined'?PRODUCTS:[]).find(x=>Number(x.id)===id);rebuild(p?.catLabel||'')})}},true)}
  const newbtn=document.getElementById('hc-new');newbtn?.addEventListener('click',()=>queueMicrotask(()=>{rebuild('');sel.value=''}));
  const titleField=form.elements.namedItem('title');
  titleField?.addEventListener('input',()=>{
-   if(category.value==='percusion'&&isContraCampana({category:'percusion',title:titleField.value})){
-     const destination='Percusión Latina, Contracampanas';
+   if(category.value==='percusion'){
+     const p={category:'percusion',title:titleField.value};
+     const destination=isChaCha(p)?'Percusión Latina, Cha-Cha':isContraCampana(p)?'Percusión Latina, Contracampanas':null;
+     if(!destination)return;
      if(sel.value!==destination){rebuild(destination);sel.value=destination;}
    }
  });

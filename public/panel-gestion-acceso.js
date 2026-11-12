@@ -26,7 +26,7 @@ const LINK='/panel-gestion.html';function attach(){const workspace=document.getE
 // No modifica datos, checkout, cookies ni los controles de administración.
 (()=>{'use strict';
  const GROUPS={
-  percusion:['Campanas','Contracampanas','Timbales','Congas','Bongós','Maracas','Baquetas','Platillos','Parantes','Clamps','Herrajes metálicos','Accesorios metálicos','Cencerros','Parches','Baterías','Otros de percusión'],
+  percusion:['Campanas','Contracampanas','Cha-Cha','Timbales','Congas','Bongós','Maracas','Baquetas','Platillos','Parantes','Clamps','Accesorios de batucada','Accesorios metálicos','Cencerro','Parches','Baterías','Otros de percusión'],
   cuerdas:['Guitarras acústicas','Guitarras eléctricas','Guitarras electroacústicas','Cuerdas','Accesorios y soportes','Otros de cuerdas'],
   bajos:['Bajos eléctricos','Bajos acústicos','Amplificadores','Cuerdas para bajo','Accesorios para bajo'],
   vientos:['Trompetas','Trombones','Saxofones','Flautas','Boquillas','Otros de vientos'],
@@ -35,9 +35,14 @@ const LINK='/panel-gestion.html';function attach(){const workspace=document.getE
  };
  const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
  const isContra=p=>p?.category==='percusion'&&/\bcontra\s*campanas?\b/.test(norm(p.title)+' '+norm(p.catLabel));
+ const isChaCha=p=>p?.category==='percusion'&&/\bcha[\s-]*chas?\b/i.test(String(p.title||''));
  const matches=(p,cat,sub)=>{
   if(!p||p.category!==cat)return false;
   const want=norm(sub),leaf=norm(String(p.catLabel||'').split(',').pop()),title=norm(p.title);
+  if(cat==='percusion'&&isChaCha(p))return want==='cha cha';
+  if(cat==='percusion'&&want==='cha cha')return leaf==='cha cha';
+  if(cat==='percusion'&&want==='accesorios de batucada')return leaf==='accesorios de batucada'||leaf==='herrajes metalicos';
+  if(cat==='percusion'&&want==='cencerro')return leaf==='cencerro'||leaf==='cencerros';
   if(cat==='percusion'&&want==='contracampanas')return isContra(p);
   if(cat==='percusion'&&want==='campanas')return !isContra(p)&&(/\bcampanas?\b/.test(title)||/\bcampanas?\b/.test(leaf));
   return leaf===want||leaf.includes(want)||(want.includes(leaf)&&leaf.length>3)||((!leaf||leaf===norm(cat))&&title.includes(want));
