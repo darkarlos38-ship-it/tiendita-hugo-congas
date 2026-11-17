@@ -411,6 +411,20 @@ export default {async fetch(req,env){
   }
  }
 
+ // Estado mínimo del pedido para actualizar el checkout sin repetir el pago.
+ // No devuelve datos personales, tarjeta, inventario ni credenciales de Izipay.
+ // El identificador aleatorio del pedido es de alta entropía; no permite enumeración secuencial.
+ if(p==='/api/izipay/order-status-live'&&method==='POST'){
+   const x=await requestJson(req),orderId=String(x?.orderId||'');
+   if(!/^HC-LIVE-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId))
+     return json({error:'Identificador de pedido inválido'},400);
+   const order=await env.DB.prepare('SELECT id,status FROM izipay_live_orders WHERE id=?').bind(orderId).first();
+   if(!order)return json({error:'Pedido no encontrado'},404);
+   const state=order.status==='PAID'?'PAID':
+     ['CANCELLED','REJECTED','REFUNDED','REFUND_PENDING','REVIEW_REQUIRED'].includes(order.status)?'REVIEW_REQUIRED':'PENDING';
+   return json({orderId:order.id,status:state});
+ }
+
  // IZIPAY ONLINE: TEST ONLY. No real-money charges in this integration.
  if(p==='/api/izipay/config'&&method==='GET'){
   // Solo anuncia producción cuando AMBOS bloqueos y la compuerta D1 estén habilitados.
