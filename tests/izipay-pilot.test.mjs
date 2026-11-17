@@ -83,7 +83,7 @@ try {
   simulatedNow = Date.parse('2026-11-17T20:00:00Z');
   r = await call('/api/izipay/checkout-live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   verify(r.status === 503, 'No se inicia un cobro sin la autorización administrativa');
-  const payload = { items: [{ id: '1234', qty: 1 }], name: 'Comprador de prueba', email: 'example@example.com', phone: '999999999', address: 'Dirección de ensayo 123', district: 'Lima', dni: '12345678', idempotencyKey: 'abcdef1234567890' };
+  const payload = { items: [{ id: '1234', qty: 1 }], name: 'Comprador de prueba', email: 'example@example.com', phone: '999999999', address: 'Dirección de ensayo 123', district: 'ATE, LIMA, LIMA', departmentCode:'15', provinceCode:'1501', districtCode:'150103', dni: '12345678', idempotencyKey: 'abcdef1234567890' };
   r = await call('/api/izipay/checkout-live', { method: 'POST', headers: { ...adminHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   verify(r.status === 409 && r.data.mode === 'test_only', 'Se rechaza un pago mayor a S/ 10 antes de llamar a Izipay');
   r = await call('/api/izipay/production/ipn', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ 'kr-answer': JSON.stringify({ orderStatus: 'PAID' }), 'kr-hash': 'a'.repeat(64) }).toString() });
