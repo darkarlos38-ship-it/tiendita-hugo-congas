@@ -24,5 +24,9 @@
       "bucket_name": "hugo-congas-media"
     }
   ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
   "keep_vars": true
 }
