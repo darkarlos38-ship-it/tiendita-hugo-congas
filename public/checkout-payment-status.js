@@ -68,6 +68,18 @@
    attempt.completed=true;
    sessionStorage.setItem(attemptKey,JSON.stringify(attempt));
   }
+  // Borrar únicamente el carrito de checkout tras leer PAID desde D1.
+  // El carrito guardado de la cuenta se actualiza de manera idempotente en el Worker.
+  sessionStorage.removeItem('hc_checkout_live_cart');
+  fetch('/api/customer/cart/consume-paid',{
+   method:'POST',headers:{'Content-Type':'application/json'},
+   credentials:'same-origin',cache:'no-store',body:JSON.stringify({orderId})
+  }).then(r=>{
+   if(r.status===401)return; // Un comprador invitado no tiene carrito persistente.
+   if(!r.ok)throw Error('sync unavailable');
+  }).catch(()=>{
+   detail.textContent+=' Si todavía ves productos en tu carrito guardado, no vuelvas a pagar; solicita verificar la sincronización del pedido.';
+  });
   panel.scrollIntoView({block:'center',behavior:'smooth'});
  }
  async function checkNow(){
