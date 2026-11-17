@@ -46,7 +46,7 @@
   payment.replaceChildren();const wrapper=document.createElement('div');wrapper.className='kr-embedded';wrapper.setAttribute('kr-form-token',result.formToken);payment.append(wrapper);
   const script=document.createElement('script');script.src='https://static.micuentaweb.pe/static/js/krypton-client/V4.0/stable/kr-payment-form.min.js';
   script.setAttribute('kr-public-key',result.publicKey);script.setAttribute('kr-language','es-Es');
-  script.onload=()=>{const css=document.createElement('link');css.rel='stylesheet';css.href='https://static.micuentaweb.pe/static/js/krypton-client/V4.0/ext/classic.css';document.head.append(css);const ext=document.createElement('script');ext.src='https://static.micuentaweb.pe/static/js/krypton-client/V4.0/ext/classic.js';document.head.append(ext);msg.textContent='Pedido '+result.orderId+' creado. Completa el pago únicamente en el formulario seguro de Izipay.'};
+  script.onload=()=>{const css=document.createElement('link');css.rel='stylesheet';css.href='https://static.micuentaweb.pe/static/js/krypton-client/V4.0/ext/classic-reset.min.css';document.head.append(css);const ext=document.createElement('script');ext.src='https://static.micuentaweb.pe/static/js/krypton-client/V4.0/ext/classic.js';document.head.append(ext);msg.textContent='Pedido '+result.orderId+' creado. Completa el pago únicamente en el formulario seguro de Izipay.'};
   script.onerror=()=>error('El formulario no cargó. No intentes iniciar una segunda compra; verifica tu pedido '+result.orderId+'.');
   document.head.append(script);
  }
