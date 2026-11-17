@@ -305,6 +305,54 @@ async function hcCustomerRoute(req,env,p,method){
   ]);
   return json({ok:true},200,{'Set-Cookie':hcCookieHeader('',0),'Cache-Control':'no-store'});
  }
+ // Consume únicamente las unidades compradas y solo tras comprobar la IPN real.
+ // Exige sesión de comprador y coincidencia con el correo del pedido.
+ // D1.batch aplica la marca de idempotencia y la resta del carrito de forma atómica.
+ if(p==='/api/customer/cart/consume-paid'&&method==='POST'){
+  const user=await hcSession(req,env);
+  if(!user)return json({error:'Sesión de comprador no disponible',cartSynced:false},401);
+  const body=await requestJson(req),orderId=String(body?.orderId||'');
+  if(!/^HC-LIVE-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId))
+   return json({error:'Pedido inválido'},400);
+  const order=await env.DB.prepare('SELECT id,status,paid_at,buyer_json FROM izipay_live_orders WHERE id=?').bind(orderId).first();
+  let buyer;
+  try{buyer=JSON.parse(order?.buyer_json||'{}')}catch{return json({error:'Pedido requiere revisión'},409)}
+  if(!order||String(buyer?.email||'').toLowerCase()!==String(user.email).toLowerCase())
+   return json({error:'Pedido no asociado a esta cuenta'},403);
+  if(order.status!=='PAID'||!order.paid_at)return json({error:'Pago aún no confirmado'},409);
+  const signed=await env.DB.prepare("SELECT 1 AS ok FROM izipay_live_webhook_events WHERE order_id=? AND verified=1 AND processing_status='GATE_CLOSED_PAID' LIMIT 1").bind(orderId).first();
+  if(!signed)return json({error:'Notificación de pago pendiente'},409);
+  if(buyer.customerCartConsumedNonce)return json({ok:true,cartSynced:true,alreadySynced:true});
+  const nonce=crypto.randomUUID(),now=new Date().toISOString();
+  const operations=[
+   env.DB.prepare(`UPDATE izipay_live_orders
+     SET buyer_json=json_set(buyer_json,'$.customerCartConsumedNonce',?),updated_at=?
+     WHERE id=? AND status='PAID' AND paid_at IS NOT NULL
+       AND json_extract(buyer_json,'$.customerCartConsumedNonce') IS NULL
+       AND lower(json_extract(buyer_json,'$.email'))=lower(?)`)
+     .bind(nonce,now,orderId,user.email),
+   env.DB.prepare(`UPDATE hc_customer_carts SET items_json=(
+     SELECT COALESCE(json_group_array(json_object('id',id,'qty',qty)),'[]')
+     FROM (
+       SELECT CAST(json_extract(j.value,'$.id') AS INTEGER) AS id,
+         CAST(json_extract(j.value,'$.qty') AS INTEGER) -
+         COALESCE((
+           SELECT CAST(json_extract(i.value,'$.qty') AS INTEGER)
+           FROM json_each((SELECT items_json FROM izipay_live_orders WHERE id=?)) i
+           WHERE CAST(json_extract(i.value,'$.id') AS TEXT)=CAST(json_extract(j.value,'$.id') AS TEXT)
+           LIMIT 1
+         ),0) AS qty
+       FROM json_each(hc_customer_carts.items_json) j
+     ) WHERE qty>0
+   ), updated_at=?
+   WHERE user_id=? AND EXISTS (
+     SELECT 1 FROM izipay_live_orders WHERE id=?
+       AND json_extract(buyer_json,'$.customerCartConsumedNonce')=?
+   )`).bind(orderId,hcNow(),user.id,orderId,nonce)
+  ];
+  await env.DB.batch(operations);
+  return json({ok:true,cartSynced:true});
+ }
  if(p==='/api/customer/cart'&&['GET','PUT'].includes(method)){
   const user=await hcSession(req,env);if(!user)return json({error:'Inicia sesión para guardar tu carrito.'},401);
   if(method==='GET'){
