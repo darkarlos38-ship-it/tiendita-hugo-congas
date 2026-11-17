@@ -1,4 +1,5 @@
-// Tiendita Musical Hugo Congas — Cloudflare Worker + D1 (sin R2)
+import {handleShipmentRoute} from './shipment-tracking.js';
+// Tiendita Musical Hugo Congas — Cloudflare Worker + D1 y R2
 const enc = new TextEncoder();
 const security = {'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'strict-origin-when-cross-origin','Content-Security-Policy':"frame-ancestors 'none'"};
 const json=(v,status=200,extra={})=>new Response(JSON.stringify(v),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...security,...extra}});
@@ -377,6 +378,8 @@ export default {async fetch(req,env){
  if(p.startsWith('/media/') && method==='GET'){
    if(!env.MEDIA_BUCKET)return new Response('Almacenamiento de imágenes no conectado',{status:503});
    const key=p.slice('/media/'.length);
+   // Las fotos de entrega son privadas: NUNCA servirlas por la ruta pública de productos.
+   if(key.startsWith('delivery-evidence/'))return new Response('No encontrado',{status:404});
    if(!/^[a-zA-Z0-9._/-]+$/.test(key))return new Response('No encontrado',{status:404});
    const object=await env.MEDIA_BUCKET.get(key);
    if(!object)return new Response('No encontrado',{status:404});
@@ -385,6 +388,8 @@ export default {async fetch(req,env){
  if(!p.startsWith('/api/'))return env.ASSETS.fetch(req);
  if(!env.DB)return json({error:'Falta conectar la base de datos D1'},503);
  if(!['GET','HEAD'].includes(method)&&p!=='/api/izipay/ipn'&&p!=='/api/izipay/production/ipn'&&!sameOrigin(req))return json({error:'Origen no autorizado'},403);
+ const shipment=await handleShipmentRoute(req,env,{auth,hcSession,json});
+ if(shipment)return shipment;
  if(p.startsWith('/api/customer/'))return hcCustomerRoute(req,env,p,method);
 
 
