@@ -8,10 +8,10 @@ const purchaseKey='hc_checkout_live_attempt_20261117_retry1';
 function element(tag='div'){
   return {
     tagName:tag,hidden:false,disabled:false,textContent:'',className:'',
-    children:[],style:{},parentElement:null,
+    children:[],adjacent:[],style:{},parentElement:null,
     addEventListener(){},append(...children){this.children.push(...children)},
     replaceChildren(...children){this.children=[...children]},
-    insertAdjacentElement(_position,item){this.children.push(item)},
+    insertAdjacentElement(_position,item){this.adjacent.push(item)},
     scrollIntoView(){},setAttribute(){},
     closest(){return null}
   };
@@ -24,7 +24,6 @@ const card=element('section'),title=element('h2');
 card.querySelector=selector=>selector==='h2'?title:null;
 nodes.get('items').closest=()=>card;
 nodes.get('total').parentElement=element('div');
-const checkoutStatus=element('section');
 const session={
   data:new Map([
     [purchaseKey,JSON.stringify({submitted:true,orderId})],
@@ -64,7 +63,7 @@ vm.runInNewContext(
   {filename:'checkout-payment-status.js',timeout:1000}
 );
 await new Promise(setImmediate);
-const result=nodes.get('payment').children.find(x=>x.id==='hc-live-payment-result');
+const result=nodes.get('payment').adjacent.find(x=>x.id==='hc-live-payment-result');
 assert.ok(result,'Debe aparecer una sección para el estado del pedido');
 assert.match(result.children[0].textContent,/Compra realizada con éxito/);
 assert.equal(nodes.get('checkout-form').hidden,true);
