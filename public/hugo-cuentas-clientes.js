@@ -129,7 +129,7 @@
      <p id="hc-customer-unavailable" hidden>Las cuentas todavía no están activadas por el administrador. Puedes seguir cotizando sin registrarte.</p>
      <span class="hc-auth-muted">Solo usamos tu correo para identificar tu cuenta y conservar tu carrito. No compartimos tus datos con otros clientes. Consulta nuestra <a href="/privacidad-clientes.html" target="_blank" rel="noopener" style="color:#f4d47a">política de privacidad</a>.</span>
    </div>
-   <div id="hc-customer-logged" hidden><p id="hc-customer-greeting"></p><p id="hc-customer-email-label"></p><button class="hc-auth-primary" id="hc-customer-see-cart" type="button">Ver mi carrito</button><button class="hc-auth-secondary" id="hc-customer-logout" type="button">Cerrar sesión</button><button class="hc-auth-secondary" id="hc-customer-delete" type="button" style="display:block;color:#f9a7a7;margin-top:8px">Eliminar mi cuenta y carrito</button></div>
+   <div id="hc-customer-logged" hidden><p id="hc-customer-greeting"></p><p id="hc-customer-email-label"></p><button class="hc-auth-primary" id="hc-customer-see-cart" type="button">Ver mi carrito</button><button class="hc-auth-secondary" id="hc-customer-see-orders" type="button">Mis pedidos y seguimiento</button><button class="hc-auth-secondary" id="hc-customer-logout" type="button">Cerrar sesión</button><button class="hc-auth-secondary" id="hc-customer-delete" type="button" style="display:block;color:#f9a7a7;margin-top:8px">Eliminar mi cuenta y carrito</button></div>
    <p id="hc-customer-status" role="status" aria-live="polite"></p>
   </div>`;
   document.body.appendChild(root);
@@ -138,6 +138,7 @@
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!root.hidden)closeModal()});
   byId('hc-customer-change-email').onclick=()=>showModal('email');
   byId('hc-customer-see-cart').onclick=()=>{closeModal();window.openCartDrawer?.()};
+  byId('hc-customer-see-orders').onclick=()=>{location.assign('/mis-pedidos.html')};
   byId('hc-customer-logout').onclick=async()=>{
     setBusy(true);
     try{await request('/api/customer/logout','POST',{});logged=false;account=null;if(canCart()){cart=[];window.updateCartUI?.()}showModal('email');note('Sesión cerrada. Tu carrito sigue guardado en tu cuenta.');}

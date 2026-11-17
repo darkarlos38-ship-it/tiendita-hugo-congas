@@ -1,0 +1,24 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mis pedidos | Tiendita Musical Hugo Congas</title>
+<style>
+:root{font-family:Inter,system-ui,Arial,sans-serif;color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#080808;color:#f5f5f5}
+.bar{height:5px;background:linear-gradient(90deg,#ec5147,#ffc529,#4ad474,#42bfe6)}
+main{max-width:920px;margin:26px auto 100px;padding:0 18px}a{color:#f5d04c}h1{font-size:clamp(27px,5vw,40px);letter-spacing:-.04em}
+.muted{color:#a8a8a8}#orders{display:grid;gap:18px}.card{padding:22px;border:1px solid #353535;background:#141414;border-radius:16px}
+.card h2{font-size:17px;overflow-wrap:anywhere}.date{color:#b3b3b3;font-size:13px}
+ol.timeline{list-style:none;padding:0;margin:24px 0 16px;border-left:2px solid #555}
+.timeline li{position:relative;padding:0 0 23px 22px;color:#929292}
+.timeline li:before{position:absolute;left:-8px;top:3px;content:"";height:14px;width:14px;border-radius:50%;background:#666;border:2px solid #161616}
+.timeline li.done{color:white}.timeline li.done:before{background:#ebc437}
+.timeline strong,.timeline small{display:block}.timeline small{color:#a7a7a7;margin-top:4px}
+.info{background:#1c1c1c;padding:14px;border-radius:9px;margin-top:12px;overflow-wrap:anywhere}
+.meta{font-size:14px;line-height:1.6}button{font:inherit;font-weight:750;background:#f5ce2f;color:#0a0a0a;border:0;border-radius:9px;padding:11px 16px;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}.msg{min-height:22px;color:#f5cf48}.confirmation{background:#1b2720;border:1px solid #36553b;border-radius:10px;padding:15px;margin-top:16px}
+.proof-link{display:inline-block;margin:12px 0}.empty{border:1px solid #444;padding:22px;border-radius:12px}
+@media(max-width:600px){.card{padding:16px}}
+</style></head><body><div class="bar"></div><main>
+<a href="/">← Volver a la tienda</a><h1>Mis pedidos</h1>
+<p class="muted">Consulta el envío de tus instrumentos, la guía de transporte y tu constancia de entrega. Solo verás compras verificadas asociadas al correo de tu cuenta.</p>
+<button id="reload">Actualizar estado</button><p id="status" class="msg" role="status"></p>
+<section id="orders" aria-label="Mis pedidos"></section>
+</main><script src="/mis-pedidos.js" defer></script></body></html>

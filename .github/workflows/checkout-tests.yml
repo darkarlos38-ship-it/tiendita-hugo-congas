@@ -10,6 +10,9 @@ on:
       - 'public/checkout*.js'
       - 'public/checkout.html'
       - 'tests/**'
+      - 'shipment-tracking.js'
+      - 'public/mis-pedidos.js'
+      - 'public/seguimiento-gestion.js'
       - '.github/workflows/checkout-tests.yml'
   workflow_dispatch:
 
@@ -30,6 +33,9 @@ jobs:
       - name: JavaScript syntax checks
         run: |
           node --check worker.js
+          node --check shipment-tracking.js
+          node --check public/mis-pedidos.js
+          node --check public/seguimiento-gestion.js
           node --check public/checkout-live.js
           node --check public/checkout-live-entry.js
           node --check public/checkout-payment-status.js
