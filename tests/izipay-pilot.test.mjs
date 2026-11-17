@@ -10,6 +10,8 @@ Date.now = () => simulatedNow;
 const token = 'd'.repeat(64);
 const tokenHash = createHash('sha256').update(token).digest('hex');
 let gate = 1, previousPilot = null, verifiedPriorIPN = false;
+const paymentOrderId='HC-LIVE-40d23809-d578-467c-b6e3-d56c19150859';
+let paymentOrderState='PAID';
 let prior = { id:'HC-LIVE-OLD',status:'AWAITING_PAYMENT',paid_at:null,created_at:'2026-11-17T19:30:00.000Z' };
 const db = {
   prepare(sql) {
@@ -19,6 +21,7 @@ const db = {
       async run() { return { meta: { changes: 0 } }; },
       async first() {
         if (sql.includes('SELECT enabled FROM hc_live_payment_gate')) return { enabled: gate };
+        if (sql.includes('SELECT id,status FROM izipay_live_orders WHERE id=?')) return params[0] === paymentOrderId ? {id:paymentOrderId,status:paymentOrderState} : null;
         if (sql.includes('SELECT expires FROM sessions')) return params[0] === tokenHash ? { expires: simulatedNow + 3600000 } : null;
         if (sql.includes('SELECT id,status,paid_at,created_at FROM izipay_live_orders')) return prior;
         if (sql.includes('SELECT 1 FROM izipay_live_webhook_events')) return verifiedPriorIPN ? { found:1 } : null;
@@ -85,7 +88,30 @@ try {
   verify(r.status === 409 && r.data.mode === 'test_only', 'Se rechaza un pago mayor a S/ 10 antes de llamar a Izipay');
   r = await call('/api/izipay/production/ipn', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ 'kr-answer': JSON.stringify({ orderStatus: 'PAID' }), 'kr-hash': 'a'.repeat(64) }).toString() });
   verify(r.status === 403, 'No se acepta una IPN con firma inválida');
-  console.log('Superadas', count, 'pruebas. No hubo cobros ni escrituras en D1.');
+
+  // Estado de pago de solo lectura: no reintenta pagos ni divulga datos del cliente.
+  const statusRequest = id => call('/api/izipay/order-status-live',{
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({orderId:id})
+  });
+  r=await statusRequest(paymentOrderId);
+  verify(r.status===200&&r.data.status==='PAID'&&r.data.orderId===paymentOrderId,'El checkout detecta el pedido pagado');
+  verify(Object.keys(r.data).sort().join(',')==='orderId,status','La respuesta no contiene datos personales ni de tarjeta');
+  paymentOrderState='AWAITING_PAYMENT';
+  r=await statusRequest(paymentOrderId);
+  verify(r.status===200&&r.data.status==='PENDING','Una orden sin IPN no aparece pagada');
+  paymentOrderState='REVIEW_REQUIRED';
+  r=await statusRequest(paymentOrderId);
+  verify(r.status===200&&r.data.status==='REVIEW_REQUIRED','Los pagos anómalos requieren revisión');
+  r=await statusRequest('HC-LIVE-INVALID');
+  verify(r.status===400,'Identificador inválido bloqueado');
+  r=await statusRequest('HC-LIVE-12345678-1234-1234-1234-123456789012');
+  verify(r.status===404,'Un pedido inexistente no se confirma');
+  r=await call('/api/izipay/order-status-live',{
+    method:'POST',headers:{Origin:'https://sitio-externo.test','Content-Type':'application/json'},
+    body:JSON.stringify({orderId:paymentOrderId})
+  });
+  verify(r.status===403,'El endpoint rechaza una solicitud desde otro origen');
+    console.log('Superadas', count, 'pruebas. No hubo cobros ni escrituras en D1.');
 } finally {
   Date.now = realNow;
 }

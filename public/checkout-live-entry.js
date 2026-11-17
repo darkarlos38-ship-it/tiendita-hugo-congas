@@ -9,6 +9,13 @@
       if(typeof cart==='undefined'||!Array.isArray(cart)||cart.length===0){alert('Agrega un instrumento al carrito.');return}
       const items=cart.map(v=>({id:v.id,qty:v.qty}));
       if(items.some(v=>!Number.isSafeInteger(Number(v.qty))||Number(v.qty)<1))throw Error('Carrito inválido');
+      // Una compra confirmada permite empezar otra solo al volver a entrar
+      // voluntariamente desde el carrito; no se borra un intento pendiente.
+      try{
+        const key='hc_checkout_live_attempt_20261117_retry1';
+        const previous=JSON.parse(sessionStorage.getItem(key)||'null');
+        if(previous?.completed===true)sessionStorage.removeItem(key);
+      }catch{}
       sessionStorage.setItem('hc_checkout_live_cart',JSON.stringify(items));
       location.assign('/checkout.html');
     }catch{alert('No se pudo preparar el carrito. Actualiza la página.')}
