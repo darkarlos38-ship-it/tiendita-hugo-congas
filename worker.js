@@ -32,7 +32,9 @@ const LIVE_ADMIN_PILOT_APPROVAL='ALLOW_SINGLE_ADMIN_LIVE_PAYMENT_20261111';
 const livePilotAllowed=env=>String(env.IZIPAY_ADMIN_LIVE_TEST_APPROVED||'')===LIVE_ADMIN_PILOT_APPROVAL;
 const LIVE_PUBLIC_APPROVAL_VALUE='OPEN_CONFIRMED_IZIPAY_20261111';
 const livePublicApproved=env=>String(env.IZIPAY_PUBLIC_CHECKOUT_APPROVED||'')===LIVE_PUBLIC_APPROVAL_VALUE;
-const LIVE_ADMIN_TEST_UNTIL=Date.parse('2026-11-15T00:00:00.000Z');
+// Piloto único del administrador: vence al terminar el 17/11/2026 en Lima (UTC-05).
+// La autorización de Cloudflare y la clave única de compra siguen siendo obligatorias.
+const LIVE_ADMIN_TEST_UNTIL=Date.parse('2026-11-18T05:00:00.000Z');
 const LIVE_ADMIN_TEST_KEY='HC_ONE_ADMIN_PURCHASE_20261111';
 const LIVE_ADMIN_TEST_MAX_CENTS=1000; // máximo S/10.00, confirmado en el formulario antes de pagar
 
