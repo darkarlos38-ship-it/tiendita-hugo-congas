@@ -1351,6 +1351,9 @@ if(p==='/api/gestion/pedidos'&&method==='GET'){
 if(/^\/api\/gestion\/pedidos\/HC-LIVE-[a-zA-Z0-9-]+$/.test(p)&&method==='PATCH'){
   if(!await auth(req,env))return json({error:'Acceso de administrador requerido'},401);
   const id=p.split('/').pop();
+  // El sistema anterior no debe cambiar un pedido ya registrado en seguimiento avanzado.
+  const newTracking=await env.DB.prepare('SELECT order_id FROM hc_order_tracking_v2 WHERE order_id=?').bind(id).first();
+  if(newTracking)return json({error:'Pedido con seguimiento avanzado. Actualízalo desde Seguimiento y constancias.'},409);
   const input=await requestJson(req);
   const status=String(input.status||'');
   const shippingReference=clean(input.shippingReference||'',150).trim();
