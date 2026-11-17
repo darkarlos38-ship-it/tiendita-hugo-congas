@@ -52,9 +52,18 @@
   if(confirmed)return;
   confirmed=true;
   panel.hidden=false;
-  heading.textContent='¡Pago confirmado!';
+  heading.textContent='¡Compra realizada con éxito!';
   heading.style.color='#70db9b';
-  detail.textContent='Tu compra quedó registrada correctamente. Guarda este número para consultar el seguimiento de tu pedido.';
+  detail.textContent='Izipay confirmó tu pago y tu compra quedó registrada. Guarda el número de pedido para consultar su seguimiento.';
+  const summary=document.getElementById('items');
+  if(summary){
+   summary.textContent='Compra confirmada. El carrito correspondiente a este pedido fue procesado.';
+   const card=summary.closest('section');
+   const title=card?.querySelector('h2');
+   if(title)title.textContent='Tu compra está confirmada';
+  }
+  const total=document.getElementById('total');
+  if(total&&total.parentElement)total.parentElement.style.display='none';
   orderLine.textContent='Pedido: '+orderId;
   verify.hidden=true;
   document.getElementById('checkout-form').hidden=true;

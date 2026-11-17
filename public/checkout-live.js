@@ -28,6 +28,22 @@
  };
  const load=async()=>{
   try{
+    // Una compra ya iniciada se comprueba primero. Nunca exigir carrito
+    // nuevamente después de que una IPN pagada haya limpiado sus productos.
+    let prior=null;
+    try{prior=JSON.parse(sessionStorage.getItem(key)||'null')}catch{}
+    if(prior?.submitted&&/^HC-LIVE-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(prior.orderId||''))){
+      const summary=document.createElement('p');
+      summary.className='hint';
+      summary.textContent='Ya existe un pedido iniciado. Estamos consultando su estado.';
+      $('items').replaceChildren(summary);
+      $('total').textContent='—';
+      $('checkout-form').hidden=true;
+      blocked.hidden=true;
+      btn.disabled=true;
+      msg.textContent='Verificando el estado de tu compra…';
+      return; // checkout-payment-status.js consulta D1 y presenta el resultado
+    }
     const [c,cat]=await Promise.all([fetch('/api/izipay/config',{cache:'no-store'}),fetch('/api/catalog',{cache:'no-store'})]);
     if(!c.ok||!cat.ok)throw Error('No se pudo consultar el estado de la tienda.');
     const config=await c.json(),data=await cat.json();products=Array.isArray(data.products)?data.products:[];
