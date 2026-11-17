@@ -33,6 +33,13 @@
     const config=await c.json(),data=await cat.json();products=Array.isArray(data.products)?data.products:[];
     chosen=inspectCart();paymentAllowed=config.production===true;
     if(!paymentAllowed){blocked.textContent='Los pagos en línea aún no están habilitados. Puedes solicitar tu compra por WhatsApp desde la tienda.';btn.textContent='Pago en línea no disponible';btn.disabled=true;return}
+    let started=null;
+    try{started=JSON.parse(sessionStorage.getItem(key)||'null')}catch{}
+    if(started?.submitted){
+      blocked.hidden=false;
+      blocked.textContent='Ya existe un pedido iniciado. Consulta su estado aquí antes de intentar otra compra.';
+      btn.textContent='Pedido ya iniciado';btn.disabled=true;return;
+    }
     blocked.hidden=true;btn.textContent='Continuar al pago seguro';btn.disabled=false;
   }catch(e){error(e.message);blocked.textContent='No fue posible iniciar el pago. Vuelve a la tienda.';btn.disabled=true}
  };
