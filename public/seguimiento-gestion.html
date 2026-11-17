@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>Seguimiento de pedidos | Hugo Congas</title>
+<style>
+:root{font-family:Inter,system-ui,Arial,sans-serif;color-scheme:dark}
+*{box-sizing:border-box}body{background:#090909;color:#fafafa;margin:0}.bar{height:4px;background:linear-gradient(90deg,#e94437,#ffc62b,#4bca69,#21b1e9)}
+main{width:min(1140px,94%);margin:28px auto 90px}a{color:#f8d141}h1{font-size:clamp(24px,4vw,36px);letter-spacing:-.03em}
+p{line-height:1.5}.hint{color:#b0b0b0;font-size:13px}.notice{background:#1b1710;border-left:3px solid #e2be24;padding:15px;margin:20px 0;border-radius:4px}
+#orders{display:grid;gap:17px}.card{border:1px solid #373737;border-radius:15px;background:#161616;padding:19px}
+h2{font-size:16px;overflow-wrap:anywhere;margin:5px 0 10px}.pill{background:#352e18;color:#f3cf4c;border-radius:8px;padding:5px 9px;font-size:12px;font-weight:700;display:inline-block}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:13px}.group{display:flex;flex-direction:column;gap:5px}
+.group label{font-size:12px;color:#a8a8a8;font-weight:600}.group span{overflow-wrap:anywhere}input,select,button{font:inherit;border-radius:8px;padding:10px;max-width:100%}
+input,select{width:100%;color:white;background:#111;border:1px solid #5b5b5b}
+button{background:#f8cc25;border:0;color:#080808;font-weight:750;cursor:pointer}button:disabled{opacity:.6;cursor:wait}
+small{color:#999}.tools{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:15px 0}
+.tools input{max-width:340px}.actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:14px 0}
+.events{margin:12px 0;padding-left:19px;color:#dadada}.events li{margin:7px 0}.proof{background:#131d16;padding:12px;border-radius:10px;margin-top:15px}
+.status{min-height:22px;color:#edca31}.error{color:#ff9999}.divider{border:0;border-top:1px solid #363636;margin:18px 0}
+@media(max-width:620px){.card{padding:14px}}
+</style></head><body><div class="bar"></div><main>
+<a href="/panel-gestion.html">← Volver al panel</a>
+<h1>Seguimiento y conformidad de entregas</h1>
+<p class="hint">Tiendita Musical Hugo Congas · Solo administradores · Pedidos pagados y conciliados.</p>
+<div class="notice">La entrega solo se marca <b>ENTREGADA</b> cuando existe foto de entrega o constancia del operador logístico guardada en R2. Las evidencias no son públicas. Para provincias registra empresa, guía y agencia; confirma la entrega real mediante constancia del transportista.</div>
+<div class="tools"><input id="search" placeholder="Buscar número de pedido, cliente o guía" aria-label="Buscar pedidos"><button id="reload">Actualizar pedidos</button></div>
+<p id="status" class="status" role="status">Comprobando acceso…</p><section id="orders"></section>
+</main><script src="/seguimiento-gestion.js" defer></script></body></html>
