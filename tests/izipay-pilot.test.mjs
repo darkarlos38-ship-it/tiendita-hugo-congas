@@ -9,7 +9,8 @@ let simulatedNow = Date.parse('2026-11-17T20:00:00Z');
 Date.now = () => simulatedNow;
 const token = 'd'.repeat(64);
 const tokenHash = createHash('sha256').update(token).digest('hex');
-let gate = 1, previousPilot = null;
+let gate = 1, previousPilot = null, verifiedPriorIPN = false;
+let prior = { id:'HC-LIVE-OLD',status:'AWAITING_PAYMENT',paid_at:null,created_at:'2026-11-17T19:30:00.000Z' };
 const db = {
   prepare(sql) {
     let params = [];
@@ -19,6 +20,8 @@ const db = {
       async first() {
         if (sql.includes('SELECT enabled FROM hc_live_payment_gate')) return { enabled: gate };
         if (sql.includes('SELECT expires FROM sessions')) return params[0] === tokenHash ? { expires: simulatedNow + 3600000 } : null;
+        if (sql.includes('SELECT id,status,paid_at,created_at FROM izipay_live_orders')) return prior;
+        if (sql.includes('SELECT 1 FROM izipay_live_webhook_events')) return verifiedPriorIPN ? { found:1 } : null;
         if (sql.includes("json_extract(buyer_json,'$.idempotencyKey')")) return previousPilot;
         if (sql.includes("name='hc_live_checkout_idempotency_v1'")) return { name: 'hc_live_checkout_idempotency_v1' };
         if (sql.includes("SELECT value FROM appdata")) return { value: JSON.stringify({ products: [{ id: 1234, title: 'Instrumento de ensayo', price: 11, stock: 1 }] }) };
@@ -59,6 +62,18 @@ try {
   previousPilot = { id: 'HC-LIVE-EXISTING' };
   r = await call('/api/izipay/config', { headers: adminHeaders });
   verify(r.data.production === false, 'Un piloto previo impide otro'); previousPilot = null;
+  prior.status='PAID';
+  r = await call('/api/izipay/config',{headers:adminHeaders});
+  verify(r.data.production===false,'No habilitar segundo intento si el anterior figura pagado');
+  prior.status='AWAITING_PAYMENT';
+  verifiedPriorIPN=true;
+  r=await call('/api/izipay/config',{headers:adminHeaders});
+  verify(r.data.production===false,'No habilitar segundo intento si llegó una IPN verificada');
+  verifiedPriorIPN=false;
+  prior.created_at='2026-11-17T19:59:00.000Z';
+  r=await call('/api/izipay/config',{headers:adminHeaders});
+  verify(r.data.production===false,'No habilitar segundo intento antes del vencimiento de 20 minutos');
+  prior.created_at='2026-11-17T19:30:00.000Z';
   simulatedNow = Date.parse('2026-11-18T05:01:00Z');
   r = await call('/api/izipay/config', { headers: adminHeaders });
   verify(r.data.production === false, 'El permiso vence al finalizar el 17 de noviembre en Lima');

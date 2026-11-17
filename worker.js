@@ -35,7 +35,15 @@ const livePublicApproved=env=>String(env.IZIPAY_PUBLIC_CHECKOUT_APPROVED||'')===
 // Piloto único del administrador: vence al terminar el 17/11/2026 en Lima (UTC-05).
 // La autorización de Cloudflare y la clave única de compra siguen siendo obligatorias.
 const LIVE_ADMIN_TEST_UNTIL=Date.parse('2026-11-18T05:00:00.000Z');
-const LIVE_ADMIN_TEST_KEY='HC_ONE_ADMIN_PURCHASE_20261111';
+const LIVE_ADMIN_PREVIOUS_TEST_KEY='HC_ONE_ADMIN_PURCHASE_20261111';
+const LIVE_ADMIN_TEST_KEY='HC_ONE_ADMIN_PURCHASE_20261117_RETRY_1';
+// Solo un reintento del piloto sin pago; nunca borra ni modifica el pedido anterior.
+async function safeAdminRetry(env){
+ const prior=await env.DB.prepare("SELECT id,status,paid_at,created_at FROM izipay_live_orders WHERE json_extract(buyer_json,'$.idempotencyKey')=? LIMIT 1").bind(LIVE_ADMIN_PREVIOUS_TEST_KEY).first();
+ if(!prior||prior.status!=='AWAITING_PAYMENT'||prior.paid_at||!Number.isFinite(Date.parse(prior.created_at))||Date.now()-Date.parse(prior.created_at)<20*60*1000)return false;
+ const verified=await env.DB.prepare("SELECT 1 FROM izipay_live_webhook_events WHERE order_id=? AND verified=1 LIMIT 1").bind(prior.id).first();
+ return !verified;
+}
 const LIVE_ADMIN_TEST_MAX_CENTS=1000; // máximo S/10.00, confirmado en el formulario antes de pagar
 
 /** Reconciliación transaccional futura. Solo callable por la IPN firmada. */
@@ -410,7 +418,7 @@ export default {async fetch(req,env){
   const gate=released?await env.DB.prepare('SELECT enabled FROM hc_live_payment_gate WHERE id=1').first():null;
   // Mostrar checkout real únicamente al público autorizado o en el ensayo exclusivo admin.
   let adminPilot=false;
-  if(!livePublicApproved(env)&&livePilotAllowed(env)&&Date.now()<LIVE_ADMIN_TEST_UNTIL&&await auth(req,env)){
+  if(!livePublicApproved(env)&&livePilotAllowed(env)&&Date.now()<LIVE_ADMIN_TEST_UNTIL&&await auth(req,env)&&await safeAdminRetry(env)){
     const already=await env.DB.prepare("SELECT id FROM izipay_live_orders WHERE json_extract(buyer_json,'$.idempotencyKey')=? LIMIT 1").bind(LIVE_ADMIN_TEST_KEY).first();
     adminPilot=!already;
   }
@@ -968,12 +976,14 @@ export default {async fetch(req,env){
   if(!await auth(req,env))return json({authenticated:false,blockers:['ADMIN_SESSION_REQUIRED']},401);
   const gate=await env.DB.prepare('SELECT enabled FROM hc_live_payment_gate WHERE id=1').first();
   const previous=await env.DB.prepare("SELECT id FROM izipay_live_orders WHERE json_extract(buyer_json,'$.idempotencyKey')=? LIMIT 1").bind(LIVE_ADMIN_TEST_KEY).first();
+  const retryEligible=await safeAdminRetry(env);
   const checks={
    authenticated:true,
    deployedDiagnosticVersion:'2026-11-17-v1',
    pilotAuthorizedInCloudflare:livePilotAllowed(env),
    pilotNotExpired:Date.now()<LIVE_ADMIN_TEST_UNTIL,
    pilotAlreadyUsed:Boolean(previous),
+   previousPilotUnpaidAndExpired:retryEligible,
    d1GateEnabled:Number(gate?.enabled)===1,
    productionCredentialsPresent:Boolean(env.IZIPAY_PROD_USER&&env.IZIPAY_PROD_PASSWORD&&env.IZIPAY_PROD_PUBLIC_KEY),
    publicCheckoutAuthorized:livePublicApproved(env),
@@ -984,6 +994,7 @@ export default {async fetch(req,env){
   if(!checks.pilotAuthorizedInCloudflare)blockers.push('PILOT_FLAG_MISSING');
   if(!checks.pilotNotExpired)blockers.push('PILOT_EXPIRED');
   if(checks.pilotAlreadyUsed)blockers.push('PILOT_ALREADY_USED');
+  if(!checks.previousPilotUnpaidAndExpired)blockers.push('PREVIOUS_ORDER_REQUIRES_REVIEW');
   if(!checks.d1GateEnabled)blockers.push('D1_GATE_CLOSED');
   if(!checks.productionCredentialsPresent)blockers.push('PRODUCTION_CREDENTIALS_MISSING');
   if(!checks.codeCheckoutEnabled||!checks.codeReconciliationEnabled)blockers.push('CODE_RELEASE_DISABLED');
@@ -1011,6 +1022,7 @@ export default {async fetch(req,env){
  if(p==='/api/izipay/checkout-live'&&method==='POST'){
   // DOBLE BLOQUEO: no se cobra ni se reserva nada mientras la liberación esté en false.
   const adminPilot=!livePublicApproved(env)&&livePilotAllowed(env)&&Date.now()<LIVE_ADMIN_TEST_UNTIL&&await auth(req,env);
+  if(adminPilot&&!await safeAdminRetry(env))return json({error:'El pedido anterior requiere revisión o aún no venció. No se permite otro intento.',mode:'disabled'},409);
   if(!LIVE_CHECKOUT_RELEASED||(!livePublicApproved(env)&&!adminPilot))return json({error:'Los pagos reales siguen desactivados. Solo se admite prueba de administrador si se autorizó expresamente.',mode:'disabled'},503);
    if(adminPilot){
      if(Date.now()>=LIVE_ADMIN_TEST_UNTIL)return json({error:'Venció la prueba limitada; checkout cerrado.',mode:'disabled'},503);
