@@ -16,6 +16,26 @@ small{color:#999}.tools{display:flex;gap:12px;flex-wrap:wrap;align-items:center;
 .tools input{max-width:340px}.actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:14px 0}
 .events{margin:12px 0;padding-left:19px;color:#dadada}.events li{margin:7px 0}.proof{background:#131d16;padding:12px;border-radius:10px;margin-top:15px}
 .status{min-height:22px;color:#edca31}.error{color:#ff9999}.divider{border:0;border-top:1px solid #363636;margin:18px 0}
+.order-purchase{background:#211c0f;border:1px solid #6b5421;border-radius:15px;padding:19px;margin:19px 0}
+.purchase-top{display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap}
+.eyebrow{display:block;color:#f6cc46;font-size:11px;font-weight:850;letter-spacing:.1em;margin-bottom:6px}
+.purchase-top h3{font-size:clamp(20px,3vw,26px);margin:0 0 8px;line-height:1.25}
+.purchase-amount{display:flex;flex-direction:column;background:#342811;padding:12px 18px;border-radius:12px;min-width:180px}
+.purchase-amount strong{font-size:clamp(27px,4vw,37px);line-height:1.1;color:#fff}
+.purchase-amount small{color:#e8cc89;font-size:11px;font-weight:800}
+.purchase-goods{display:grid;gap:12px;margin-top:16px}
+.purchase-item{display:flex;align-items:center;gap:16px;background:#0d0d0d;border:1px solid #51462f;padding:13px;border-radius:12px}
+.purchase-photo,.purchase-placeholder{width:82px;height:82px;border-radius:10px;object-fit:contain;background:#242424;flex-shrink:0}
+.purchase-placeholder{display:grid;place-items:center;font-size:32px}
+.purchase-description{min-width:0;overflow-wrap:anywhere}
+.purchase-description b{display:block;font-size:clamp(17px,3vw,22px);line-height:1.3}
+.purchase-quantity{font-size:18px;font-weight:850;color:#f5ce37;margin-top:6px}
+.purchase-price{margin:4px 0 0;color:#d0ccc4;font-size:13px}
+.summary-help{font-size:13px;color:#e7d8ab;margin:13px 0 0}
+.purchase-recipient{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:20px;border:1px solid #414141;border-radius:12px;padding:16px;margin:0 0 23px}
+.purchase-recipient strong{font-size:17px;overflow-wrap:anywhere}.purchase-recipient p{color:#bababa;font-size:13px;margin:5px 0}
+.step-heading{font-size:20px;margin:22px 0 14px}
+@media(max-width:620px){.purchase-amount{width:100%}.purchase-item{align-items:flex-start}.purchase-photo,.purchase-placeholder{width:68px;height:68px}}
 @media(max-width:620px){.card{padding:14px}}
 </style></head><body><div class="bar"></div><main>
 <a href="/panel-gestion.html">← Volver al panel</a>
