@@ -14,6 +14,8 @@ on:
       - 'public/mis-pedidos.js'
       - 'public/seguimiento-gestion.js'
       - 'public/panel-pedidos-resumen.js'
+      - 'public/ubigeo-select.js'
+      - 'ubigeo-peru.js'
       - 'public/panel-gestion.html'
       - '.github/workflows/checkout-tests.yml'
   workflow_dispatch:
@@ -39,6 +41,8 @@ jobs:
           node --check public/mis-pedidos.js
           node --check public/seguimiento-gestion.js
           node --check public/panel-pedidos-resumen.js
+          node --check public/ubigeo-select.js
+          node --check ubigeo-peru.js
           node --check public/checkout-live.js
           node --check public/checkout-live-entry.js
           node --check public/checkout-payment-status.js
