@@ -1,6 +1,50 @@
 (()=>{'use strict';
 const $=id=>document.getElementById(id);
-let orders=[];
+let orders=[],catalogPhotos=new Map();
+const money=n=>'S/ '+(Number(n||0)/100).toLocaleString('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2});
+const photoOkay=url=>typeof url==='string'&&(
+ /^\/(?:images|media)\/[a-zA-Z0-9._/-]+$/.test(url)||
+ /^https:\/\/[^\s<>"']+$/i.test(url)
+);
+function purchaseSummary(card,o){
+ const wrap=element('section','',card);wrap.className='order-purchase';
+ const top=element('div','',wrap);top.className='purchase-top';
+ const caption=element('div','',top);
+ element('span','PRODUCTOS QUE DEBE PREPARAR',caption).className='eyebrow';
+ element('h3','Qué compró este cliente',caption);
+ const amount=element('div','',top);amount.className='purchase-amount';
+ element('small','TOTAL PAGADO',amount);
+ element('strong',money(o.amountCents),amount);
+ element('small','Pago confirmado por Izipay',amount);
+ const goods=element('div','',wrap);goods.className='purchase-goods';
+ for(const it of Array.isArray(o.items)?o.items:[]){
+  const line=element('div','',goods);line.className='purchase-item';
+  const picture=catalogPhotos.get(String(it.id));
+  if(picture){
+   const img=element('img','',line);img.src=picture;img.alt='Foto del instrumento';img.loading='lazy';img.className='purchase-photo';
+  }else{
+   const placeholder=element('span','📦',line);placeholder.className='purchase-placeholder';placeholder.setAttribute('aria-hidden','true');
+  }
+  const info=element('div','',line);info.className='purchase-description';
+  element('b',String(it.title||'Producto registrado sin nombre'),info);
+  const quantity=Number(it.qty)||1;
+  element('div',quantity+' '+(quantity===1?'unidad':'unidades'),info).className='purchase-quantity';
+  if(it.unit_cents!==undefined&&Number.isSafeInteger(Number(it.unit_cents))&&Number(it.unit_cents)>=0){
+   element('p','Precio unitario: '+money(it.unit_cents)+' · Subtotal: '+money(Number(it.unit_cents)*quantity),info).className='purchase-price';
+  }
+ }
+ element('p','Antes de preparar la caja, comprueba los nombres y cantidades de estos productos.',wrap).className='summary-help';
+}
+async function loadPhotos(){
+ try{
+  const res=await fetch('/api/catalog',{credentials:'same-origin',cache:'no-store'});
+  if(!res.ok)return;
+  const body=await res.json();
+  for(const p of Array.isArray(body.products)?body.products:[])
+   if(photoOkay(p.image))catalogPhotos.set(String(p.id),p.image);
+ }catch{/* Las fotos son opcionales: el monto y los productos siguen visibles. */}
+}
+
 const names={ACCEPTED:'Pedido aceptado',PACKING:'Siendo empaquetado',SHIPPED:'Enviado con repartidor o transportista',AGENCY_ARRIVED:'Llegó a la agencia de destino',DELIVERED:'Pedido entregado',CUSTOMER_CONFIRMED:'Recepción confirmada',PROOF_UPLOADED:'Constancia registrada'};
 const next={ACCEPTED:['PACKING'],PACKING:['SHIPPED'],SHIPPED:['AGENCY_ARRIVED','DELIVERED'],AGENCY_ARRIVED:['DELIVERED'],DELIVERED:[]};
 const node=(tag,text)=>{const v=document.createElement(tag);if(text!==undefined)v.textContent=String(text||'');return v};
@@ -23,16 +67,24 @@ async function api(url,options={}){
 function view(){
  const list=$('orders');list.replaceChildren();
  const search=$('search').value.toLowerCase().trim();
- const shown=orders.filter(o=>[o.id,o.buyer?.name,o.buyer?.email,o.buyer?.district,o.trackingNumber].join(' ').toLowerCase().includes(search));
+ const shown=orders.filter(o=>[o.id,o.buyer?.name,o.buyer?.email,o.buyer?.district,o.trackingNumber,...(o.items||[]).map(x=>x.title)].join(' ').toLowerCase().includes(search));
  if(!shown.length){list.appendChild(node('p','No hay pedidos pagados que coincidan.'));return}
  for(const o of shown){
   const card=element('article','',list);card.className='card';
   const header=element('div','',card);header.className='actions';
   const title=element('h2','Pedido '+o.id,header);
   const pill=element('span',names[o.status]||o.status,header);pill.className='pill';
-  const desc=element('p','Cliente: '+(o.buyer?.name||'No indicado')+' · '+(o.buyer?.email||'')+' · '+(o.buyer?.phone||'')+' · '+(o.buyer?.district||''),card);desc.className='hint';
-  const addr=element('p','Dirección: '+(o.buyer?.address||'No registrada'),card);addr.className='hint';
-  const items=element('p','Productos: '+o.items.map(i=>i.qty+' × '+(i.title||i.id)).join(' · '),card);items.className='hint';
+  purchaseSummary(card,o);
+  const recipient=element('section','',card);recipient.className='purchase-recipient';
+  const who=element('div','',recipient);
+  element('span','ENTREGAR A',who).className='eyebrow';
+  element('strong',o.buyer?.name||'Nombre no registrado',who);
+  element('p',[o.buyer?.phone,o.buyer?.email].filter(Boolean).join(' · ')||'Sin datos de contacto',who);
+  const where=element('div','',recipient);
+  element('span','DIRECCIÓN DE ENTREGA',where).className='eyebrow';
+  element('strong',[o.buyer?.address,o.buyer?.district].filter(Boolean).join(' · ')||'Dirección no registrada',where);
+  if(o.buyer?.deliveryReference)element('p','Referencia: '+o.buyer.deliveryReference,where);
+  element('h3','1. Preparar y enviar el pedido',card).className='step-heading';
   const grid=element('div','',card);grid.className='grid';
   const modeWrap=element('div','',grid);modeWrap.className='group';element('label','Modalidad de envío',modeWrap);
   const mode=element('select','',modeWrap);
@@ -56,7 +108,7 @@ function view(){
   }
   mode.onchange=changeMode;
   const buttons=element('div','',card);buttons.className='actions';
-  const save=element('button','Guardar seguimiento',buttons);
+  const save=element('button','Guardar cambios del pedido',buttons);
   if(o.customerConfirmedAt)save.disabled=true;
   const progress=element('p','',card);progress.className='status';progress.setAttribute('role','status');
   save.onclick=async()=>{
@@ -71,7 +123,7 @@ function view(){
   };
   element('hr','',card).className='divider';
   const proof=element('div','',card);proof.className='proof';
-  element('b','Constancia de entrega',proof);
+  element('h3','2. Fotografía o constancia de entrega',proof);
   if(o.evidenceKind){
    element('p','Evidencia registrada el '+time(o.evidenceUploadedAt)+(o.evidenceKind==='CARRIER_PROOF'?' · Operador logístico':' · Entrega local'),proof);
    const a=element('a','Ver foto o constancia protegida',proof);a.href='/api/gestion/seguimiento/'+encodeURIComponent(o.id)+'/proof';a.target='_blank';a.rel='noopener';
@@ -109,6 +161,7 @@ async function load(){
  message('Cargando pedidos pagados…');
  try{
   const response=await api('/api/gestion/seguimiento');orders=response.orders||[];
+  await loadPhotos();
   message(orders.length+' pedidos con seguimiento disponibles.');view();
  }catch(e){message(e.message,true)}
 }
