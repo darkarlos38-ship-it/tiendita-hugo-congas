@@ -10,7 +10,7 @@
 a{color:#f9c929}h1{font-size:clamp(25px,4vw,38px);letter-spacing:-.04em;margin:24px 0 8px}.lead{color:#b8b8b8;margin:0 0 24px}
 .grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:18px}.card{background:#141414;border:1px solid #323232;border-radius:15px;padding:23px}h2{font-size:19px;margin:0 0 17px}
 .item{border-bottom:1px solid #2a2a2a;padding:11px 0;display:flex;gap:16px;justify-content:space-between}.item:last-child{border:0}.item strong{white-space:nowrap}.sum{border-top:1px solid #444;margin-top:20px;padding-top:16px;display:flex;justify-content:space-between;font-size:20px;font-weight:800}
-label{display:block;margin:12px 0 5px;font-weight:650}input{display:block;width:100%;padding:12px 13px;background:#080808;color:#fff;border:1px solid #575757;border-radius:8px;font:inherit}input:focus{outline:2px solid #ffd44d;outline-offset:1px}
+label{display:block;margin:12px 0 5px;font-weight:650}input,select{display:block;width:100%;padding:12px 13px;background:#080808;color:#fff;border:1px solid #575757;border-radius:8px;font:inherit}input:focus,select:focus{outline:2px solid #ffd44d;outline-offset:1px}select:disabled{opacity:.6;cursor:not-allowed}#geo-status{margin:9px 0 14px;color:#d4c78f}
 button{background:#f8c52e;border:0;color:#090909;border-radius:8px;padding:14px 18px;font:inherit;font-weight:750;cursor:pointer;width:100%;margin-top:18px}button:disabled{cursor:not-allowed;opacity:.45}.hint{color:#acacac;font-size:13px}.status{margin-top:16px;min-height:24px;color:#f2c659;white-space:pre-wrap}.blocked{border:1px solid #544629;border-radius:10px;padding:12px 14px;background:#261f12;color:#f4d28a;margin-top:13px}.pay{margin-top:20px}
 /* El formulario de Izipay tiene entradas claras dentro de una página oscura.
    No propagar el modo oscuro a sus campos. No afecta al formulario de compra. */
@@ -39,8 +39,14 @@ button{background:#f8c52e;border:0;color:#090909;border-radius:8px;padding:14px 
 <label for="email">Correo electrónico</label><input id="email" name="email" type="email" required maxlength="160" autocomplete="email">
 <label for="phone">Celular</label><input id="phone" name="phone" type="tel" required minlength="7" maxlength="25" autocomplete="tel">
 <label for="dni">DNI / documento de identidad</label><input id="dni" name="dni" required minlength="7" maxlength="20" pattern="[0-9A-Za-z-]{7,20}" placeholder="DNI o CE">
-<label for="district">Distrito y ciudad</label><input id="district" name="district" required minlength="2" maxlength="100" placeholder="Ej. Ate, Lima">
-<label for="address">Dirección de entrega</label><input id="address" name="address" required minlength="5" maxlength="300" autocomplete="street-address">
+<label for="departmentCode">Departamento</label>
+<select id="departmentCode" name="departmentCode" required disabled><option value="">Cargando departamentos…</option></select>
+<label for="provinceCode">Provincia</label>
+<select id="provinceCode" name="provinceCode" required disabled><option value="">Primero selecciona un departamento</option></select>
+<label for="districtCode">Distrito</label>
+<select id="districtCode" name="districtCode" required disabled><option value="">Primero selecciona una provincia</option></select>
+<p id="geo-status" class="hint" role="status" aria-live="polite">Cargando distritos y provincias de Perú…</p>
+<label for="address">Dirección de entrega (calle, avenida, número y urbanización)</label><input id="address" name="address" required minlength="5" maxlength="300" autocomplete="street-address" placeholder="Ej. Av. Los Parques 210, interior 3">
 <label for="deliveryReference">Referencia del domicilio (opcional)</label><input id="deliveryReference" name="deliveryReference" maxlength="180" placeholder="Ej. Frente al parque, portón verde">
 <button id="pay-button" disabled>Pago en línea no disponible</button>
 </form>
@@ -49,4 +55,4 @@ button{background:#f8c52e;border:0;color:#090909;border-radius:8px;padding:14px 
 <div id="payment" class="pay"></div>
 <p class="small">No ingreses datos de tarjeta fuera del formulario seguro de Izipay. Si ya intentaste pagar, no generes otro pedido antes de verificar el anterior.</p>
 </section></div>
-</main><script src="/checkout-live.js" defer></script><script src="/checkout-payment-status.js" defer></script></body></html>
+</main><script src="/ubigeo-select.js" defer></script><script src="/checkout-live.js" defer></script><script src="/checkout-payment-status.js" defer></script></body></html>
