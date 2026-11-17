@@ -5,7 +5,7 @@
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
-    "test": "node --experimental-default-type=module tests/izipay-pilot.test.mjs && node --experimental-default-type=module tests/checkout-resume.test.mjs"
+    "test": "node --experimental-default-type=module tests/izipay-pilot.test.mjs && node --experimental-default-type=module tests/checkout-resume.test.mjs && node --experimental-default-type=module tests/shipment-tracking.test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
