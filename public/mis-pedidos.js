@@ -33,11 +33,15 @@ function view(orders){
   const events=o.history||[];
   const timeline=add(card,'ol');timeline.className='timeline';
   for(let i=0;i<stages.length;i++){
-   const s=stages[i],li=add(timeline,'li');if(i<=rank)li.className='done';
-   add(li,'strong',labels[s]);
+   const s=stages[i],li=add(timeline,'li');
    const matching=events.filter(e=>e.status===s);const last=matching[matching.length-1];
+   // Una entrega provincial puede llegar al domicilio sin pasar por agencia.
+   // Nunca marcar "llegó a agencia" si el operador no reportó ese hito.
+   const done=i<=rank&&(s!=='AGENCY_ARRIVED'||o.status==='AGENCY_ARRIVED'||!!last);
+   if(done)li.className='done';
+   add(li,'strong',labels[s]);
    const fallback=s==='ACCEPTED'?o.paidAt:s==='DELIVERED'?o.deliveredAt:null;
-   add(li,'small',i<=rank?date(last?.at||fallback):'Pendiente');
+   add(li,'small',done?date(last?.at||fallback):(s==='AGENCY_ARRIVED'&&o.status==='DELIVERED'?'No reportado por la agencia':'Pendiente'));
   }
   if(o.shippingMode==='PROVINCE'&&o.status!=='DELIVERED'&&o.status!=='AGENCY_ARRIVED'){
    add(card,'p','Para verificar dónde está tu pedido, consulta el número de guía con el transportista. La llegada a la ciudad no significa que el destinatario ya lo haya recibido.').className='muted';
