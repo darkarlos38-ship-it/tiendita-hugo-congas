@@ -71,6 +71,7 @@ function view(){
  if(!shown.length){list.appendChild(node('p','No hay pedidos pagados que coincidan.'));return}
  for(const o of shown){
   const card=element('article','',list);card.className='card';
+  card.id='pedido-'+o.id;
   const header=element('div','',card);header.className='actions';
   const title=element('h2','Pedido '+o.id,header);
   const pill=element('span',names[o.status]||o.status,header);pill.className='pill';
@@ -163,6 +164,10 @@ async function load(){
   const response=await api('/api/gestion/seguimiento');orders=response.orders||[];
   await loadPhotos();
   message(orders.length+' pedidos con seguimiento disponibles.');view();
+  if(location.hash.startsWith('#pedido-HC-LIVE-')){
+   const target=document.getElementById(decodeURIComponent(location.hash.slice(1)));
+   if(target)target.scrollIntoView({block:'start'});
+  }
  }catch(e){message(e.message,true)}
 }
 $('reload').onclick=load;$('search').oninput=view;load();
