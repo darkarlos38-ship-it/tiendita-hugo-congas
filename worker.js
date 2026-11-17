@@ -1,4 +1,5 @@
 import {handleShipmentRoute} from './shipment-tracking.js';
+import {UBIGEO_PE,resolveUbigeo} from './ubigeo-peru.js';
 // Tiendita Musical Hugo Congas — Cloudflare Worker + D1 y R2
 const enc = new TextEncoder();
 const security = {'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'strict-origin-when-cross-origin','Content-Security-Policy':"frame-ancestors 'none'"};
@@ -387,6 +388,7 @@ export default {async fetch(req,env){
  }
  if(!p.startsWith('/api/'))return env.ASSETS.fetch(req);
  if(!env.DB)return json({error:'Falta conectar la base de datos D1'},503);
+ if(p==='/api/geo/peru'&&method==='GET')return json(UBIGEO_PE);
  if(!['GET','HEAD'].includes(method)&&p!=='/api/izipay/ipn'&&p!=='/api/izipay/production/ipn'&&!sameOrigin(req))return json({error:'Origen no autorizado'},403);
  const shipment=await handleShipmentRoute(req,env,{auth,hcSession,json});
  if(shipment)return shipment;
@@ -1114,8 +1116,12 @@ export default {async fetch(req,env){
     return json({error:'Falta identificador de compra. Actualiza el carrito antes de pagar.'},400);
   if(!Array.isArray(x.items)||x.items.length<1||x.items.length>20)
     return json({error:'El carrito debe contener de 1 a 20 productos'},400);
+  // Evita nombres digitados incorrectamente: confirma relación UBIGEO en servidor.
+  const geographic=resolveUbigeo(x.departmentCode,x.provinceCode,x.districtCode);
+  if(!geographic)return json({error:'Selecciona un departamento, provincia y distrito válidos de Perú'},400);
   const name=clean(x.name,120).trim(),email=clean(x.email,160).trim(),phone=clean(x.phone,30).trim(),
-    address=clean(x.address,300).trim(),district=clean(x.district,100).trim();
+    address=clean(x.address,300).trim(),
+    district=[geographic.district,geographic.province,geographic.department].join(', ');
   if(!/^[A-Za-z0-9-]{7,20}$/.test(String(x.dni||'')))return json({error:'Ingresa un DNI o documento válido para realizar el envío'},400);
   if(name.length<3||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||
      !/^[+\d\s()-]{7,25}$/.test(phone)||address.length<5||district.length<2)
@@ -1153,7 +1159,9 @@ export default {async fetch(req,env){
    // Idempotencia fuerte: índice único D1 sobre buyer_json.idempotencyKey.
   // La firma detecta una misma clave reutilizada con otro carrito o comprador.
   selected.sort((a,b)=>a.id.localeCompare(b.id,'en',{numeric:true}));
-  const requestHash=await digest(JSON.stringify({items:selected.map(({id,qty,unit_cents})=>({id,qty,unit_cents})),name,email,phone,address,district,dni:clean(x.dni||'',20),deliveryReference:clean(x.deliveryReference||'',180)}));
+  const requestHash=await digest(JSON.stringify({items:selected.map(({id,qty,unit_cents})=>({id,qty,unit_cents})),name,email,phone,address,district,
+    departmentCode:geographic.departmentCode,provinceCode:geographic.provinceCode,districtCode:geographic.districtCode,
+    dni:clean(x.dni||'',20),deliveryReference:clean(x.deliveryReference||'',180)}));
   const existing=await env.DB.prepare(`SELECT id,status,buyer_json FROM izipay_live_orders
     WHERE json_extract(buyer_json,'$.idempotencyKey')=?`).bind(idempotencyKey).first();
   if(existing){
@@ -1162,7 +1170,10 @@ export default {async fetch(req,env){
   }
   const orderId='HC-LIVE-'+crypto.randomUUID(),now=new Date().toISOString(),
     expires=new Date(Date.now()+15*60*1000).toISOString();
-  const buyer={name,email,phone,address,district,dni:clean(x.dni||'',20),deliveryReference:clean(x.deliveryReference||'',180),shipping:'free_included',idempotencyKey,requestHash,adminControlledTest:adminPilot};
+  const buyer={name,email,phone,address,district,department:geographic.department,province:geographic.province,
+    departmentCode:geographic.departmentCode,provinceCode:geographic.provinceCode,districtCode:geographic.districtCode,
+    dni:clean(x.dni||'',20),deliveryReference:clean(x.deliveryReference||'',180),
+    shipping:'free_included',idempotencyKey,requestHash,adminControlledTest:adminPilot};
   // D1.batch es transaccional: el pedido y TODAS las reservas se crean o ninguno.
   const commands=[env.DB.prepare(`INSERT INTO izipay_live_orders
     (id,items_json,amount_cents,shipping_cents,currency,buyer_json,status,created_at,updated_at)
