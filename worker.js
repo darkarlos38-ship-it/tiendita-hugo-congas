@@ -1136,6 +1136,15 @@ export default {async fetch(req,env){
   return json({mode:'live',orderId,amount,currency:'PEN',shippingCents:0,
     formToken:payload.answer.formToken,publicKey:env.IZIPAY_PROD_PUBLIC_KEY});
  }
+ // Diagnóstico seguro de la cookie administrativa: no expone tokens ni modifica datos.
+ if(p==='/api/session-diagnostic'&&method==='GET'){
+   const occurrences=(req.headers.get('cookie')||'').split(';').filter(v=>v.trim().startsWith('hc_admin=')).length;
+   const token=cookie(req),present=token.length>0,validFormat=/^[0-9a-f]{64}$/.test(token);
+   const row=validFormat?await env.DB.prepare('SELECT expires FROM sessions WHERE token_hash=?').bind(await digest(token)).first():null;
+   const sessionFound=!!row,active=sessionFound&&Number(row.expires)>Date.now();
+   const reason=!present?'COOKIE_NOT_SENT':!validFormat?'COOKIE_INVALID_FORMAT':!sessionFound?'SESSION_NOT_FOUND':!active?'SESSION_EXPIRED':'AUTHENTICATED';
+   return json({host:url.hostname,authenticated:active,reason,adminCookieCount:occurrences},200,{'Cache-Control':'no-store'});
+ }
  if(p==='/api/session'&&method==='GET')return json({authenticated:await auth(req,env)});
  if(p==='/api/login'&&method==='POST'){
    if(!env.ADMIN_USER||!env.ADMIN_PASSWORD||env.ADMIN_PASSWORD.length<12)return json({error:'Configura los secretos ADMIN_USER y ADMIN_PASSWORD en Cloudflare'},503);
