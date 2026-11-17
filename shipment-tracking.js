@@ -102,12 +102,16 @@ export async function handleShipmentRoute(req,env,{auth,hcSession,json}){
    return json({error:'Aún no consta una entrega respaldada por evidencia'},409);
   if(order.customer_confirmed_at)return json({ok:true,alreadyConfirmed:true,confirmedAt:order.customer_confirmed_at});
   const now=new Date().toISOString();
-  const updated=await env.DB.prepare(`UPDATE hc_order_tracking_v2 SET customer_confirmed_at=?
-   WHERE order_id=? AND status='DELIVERED' AND customer_confirmed_at IS NULL
-   AND EXISTS(SELECT 1 FROM hc_delivery_evidence_v2 WHERE order_id=?)`).bind(now,orderId,orderId).run();
-  if(Number(updated.meta?.changes)!==1)return json({error:'La confirmación ya se procesó o cambió el pedido. Actualiza la página.'},409);
-  await env.DB.prepare('INSERT INTO hc_order_tracking_events_v2(id,order_id,status,actor,detail,created_at) VALUES(?,?,?,?,?,?)')
-   .bind(crypto.randomUUID(),orderId,'CUSTOMER_CONFIRMED','CUSTOMER','El cliente confirmó haber recibido su pedido',now).run();
+  const results=await env.DB.batch([
+   env.DB.prepare(`UPDATE hc_order_tracking_v2 SET customer_confirmed_at=?
+    WHERE order_id=? AND status='DELIVERED' AND customer_confirmed_at IS NULL
+    AND EXISTS(SELECT 1 FROM hc_delivery_evidence_v2 WHERE order_id=?)`).bind(now,orderId,orderId),
+   env.DB.prepare(`INSERT INTO hc_order_tracking_events_v2(id,order_id,status,actor,detail,created_at)
+    SELECT ?,?,?,?,?,? WHERE EXISTS (
+      SELECT 1 FROM hc_order_tracking_v2 WHERE order_id=? AND customer_confirmed_at=?
+    )`).bind(crypto.randomUUID(),orderId,'CUSTOMER_CONFIRMED','CUSTOMER','El cliente confirmó haber recibido su pedido',now,orderId,now)
+  ]);
+  if(Number(results[0]?.meta?.changes)!==1)return json({error:'La confirmación ya se procesó o cambió el pedido. Actualiza la página.'},409);
   return json({ok:true,confirmedAt:now});
  }
  if(isAdmin&&p.endsWith('/proof')&&method==='POST'){
