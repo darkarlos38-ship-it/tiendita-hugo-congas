@@ -963,6 +963,33 @@ export default {async fetch(req,env){
       : 'Checkout público CERRADO. Las IPN auténticas de pedidos existentes pueden seguir conciliándose. Verificar el pedido antiguo en Izipay antes de activar la autorización pública.'});
  }
 
+ // Read-only diagnostic: authenticated admin only; never creates payments or modifies D1.
+ if(p==='/api/izipay/pilot-diagnostic'&&method==='GET'){
+  if(!await auth(req,env))return json({authenticated:false,blockers:['ADMIN_SESSION_REQUIRED']},401);
+  const gate=await env.DB.prepare('SELECT enabled FROM hc_live_payment_gate WHERE id=1').first();
+  const previous=await env.DB.prepare("SELECT id FROM izipay_live_orders WHERE json_extract(buyer_json,'$.idempotencyKey')=? LIMIT 1").bind(LIVE_ADMIN_TEST_KEY).first();
+  const checks={
+   authenticated:true,
+   deployedDiagnosticVersion:'2026-11-17-v1',
+   pilotAuthorizedInCloudflare:livePilotAllowed(env),
+   pilotNotExpired:Date.now()<LIVE_ADMIN_TEST_UNTIL,
+   pilotAlreadyUsed:Boolean(previous),
+   d1GateEnabled:Number(gate?.enabled)===1,
+   productionCredentialsPresent:Boolean(env.IZIPAY_PROD_USER&&env.IZIPAY_PROD_PASSWORD&&env.IZIPAY_PROD_PUBLIC_KEY),
+   publicCheckoutAuthorized:livePublicApproved(env),
+   codeCheckoutEnabled:LIVE_CHECKOUT_RELEASED,
+   codeReconciliationEnabled:LIVE_RECONCILIATION_RELEASED
+  };
+  const blockers=[];
+  if(!checks.pilotAuthorizedInCloudflare)blockers.push('PILOT_FLAG_MISSING');
+  if(!checks.pilotNotExpired)blockers.push('PILOT_EXPIRED');
+  if(checks.pilotAlreadyUsed)blockers.push('PILOT_ALREADY_USED');
+  if(!checks.d1GateEnabled)blockers.push('D1_GATE_CLOSED');
+  if(!checks.productionCredentialsPresent)blockers.push('PRODUCTION_CREDENTIALS_MISSING');
+  if(!checks.codeCheckoutEnabled||!checks.codeReconciliationEnabled)blockers.push('CODE_RELEASE_DISABLED');
+  return json({...checks,blockers,pilotReady:!checks.publicCheckoutAuthorized&&blockers.length===0});
+ }
+ 
  if(p==='/api/izipay/production-readiness'&&method==='GET'){
   if(!await auth(req,env))return json({error:'Solo administrador'},401);
   const keys=['IZIPAY_PROD_USER','IZIPAY_PROD_PASSWORD','IZIPAY_PROD_PUBLIC_KEY','IZIPAY_PROD_HMAC'];
