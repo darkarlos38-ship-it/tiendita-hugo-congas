@@ -3,7 +3,7 @@
  'use strict';
  const $=id=>document.getElementById(id);
  const btn=$('pay-button'),msg=$('status'),blocked=$('blocked'),payment=$('payment');
- const key='hc_checkout_live_attempt_v1';
+ const key='hc_checkout_live_attempt_20261117_retry1';
  let products=[],chosen=[],paymentAllowed=false,busy=false;
  const error=t=>{msg.textContent=String(t||'No se pudo continuar');};
  const fmt=cents=>'S/ '+(cents/100).toLocaleString('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2});
