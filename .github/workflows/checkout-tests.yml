@@ -1,0 +1,36 @@
+name: Checkout and Izipay safeguards
+
+on:
+  push:
+    branches:
+      - fix/checkout-payment-confirmation-20261117
+  pull_request:
+    paths:
+      - 'worker.js'
+      - 'public/checkout*.js'
+      - 'public/checkout.html'
+      - 'tests/**'
+      - '.github/workflows/checkout-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Unit tests (no network payment requests)
+        run: npm test
+      - name: JavaScript syntax checks
+        run: |
+          node --check worker.js
+          node --check public/checkout-live.js
+          node --check public/checkout-live-entry.js
+          node --check public/checkout-payment-status.js
+          node --check public/paid-cart-recovery.js
